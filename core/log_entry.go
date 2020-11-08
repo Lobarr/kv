@@ -30,7 +30,7 @@ type LogEntry struct {
 }
 
 func (le LogEntry) Encode() ([]byte, error) {
-  return msgpack.Marshal(&le)
+	return msgpack.Marshal(&le)
 }
 
 func (le *LogEntry) Decode(logEntryBytes []byte) error {
