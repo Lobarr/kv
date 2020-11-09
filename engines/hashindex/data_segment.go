@@ -1,6 +1,7 @@
 package hashindex
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +13,8 @@ import (
 )
 
 var ErrClosedDataSegment = errors.New("data segment closed")
+
+var LogEntrySeperator = []byte("\n")
 
 type dataSegment struct {
 	entriesCount int
@@ -38,7 +41,8 @@ func (ds *dataSegment) addLogEntry(logEntry *core.LogEntry) (*core.LogEntryIndex
 	}
 
 	startOffset := ds.offset
-	bytesWrittenSize, err := ds.file.WriteAt(logEntryBytes, startOffset)
+	logEntryBytesWithSeperator := bytes.Join([][]byte{logEntryBytes, make([]byte, 0)}, LogEntrySeperator)
+	bytesWrittenSize, err := ds.file.WriteAt(logEntryBytesWithSeperator, startOffset)
 
 	if err != nil {
 		return nil, err

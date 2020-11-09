@@ -1,19 +1,22 @@
 package hashindex
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	lru "github.com/hashicorp/golang-lru"
-	"github.com/vmihailenco/msgpack/v5"
 	"io/ioutil"
 	"os"
 	"path"
+	"sort"
 	"storage-engines/core"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	lru "github.com/hashicorp/golang-lru"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 var ErrKeyNotFound = errors.New("key not found")
@@ -29,6 +32,7 @@ type Engine struct {
 	compactorInterval          time.Duration
 	mu                         *sync.RWMutex
 	ctx                        context.Context
+	compactorWorkerCount       int
 }
 
 type EngineConfig struct {
@@ -37,6 +41,7 @@ type EngineConfig struct {
 	TolerableSnapshotFailCount int
 	CacheSize                  int
 	CompactorInterval          time.Duration
+	CompactorWorkerCount       int
 }
 
 func (engine *Engine) captureSnapshots(ctx context.Context, interval time.Duration, tolerableFailCount int) {
@@ -69,7 +74,7 @@ func (engine *Engine) checkDataSegment() error {
 			return err
 		}
 
-		if err = engine.snapshot(); err != nil {
+		if err := engine.snapshot(); err != nil {
 			return err
 		}
 
@@ -283,24 +288,137 @@ func (engine *Engine) isRecoverable() (bool, error) {
 }
 
 func (engine *Engine) compactSegments() error {
+	fmt.Println("starting segments compaction")
+
 	files, err := ioutil.ReadDir(getSegmentsPath())
 	if err != nil {
 		return err
 	}
 
-	for _, file := range files {
-		segmentID := file.Name()
-		segmentLogEntries, ok := engine.logEntryIndexesBySegmentID[segmentID]
+	type compactedSegmentEntriesContext struct {
+		compactedEntries map[string]*core.LogEntry // key to log entry
+		timestamp        int64
+	}
 
-		if !ok {
+	type jobContext struct {
+		timestamp       int64
+		segmentID       string
+		logEntriesBytes [][]byte
+	}
+
+	compactedSegmentEntries := make([]compactedSegmentEntriesContext, 0)
+	wg := new(sync.WaitGroup)
+	mu := new(sync.Mutex)
+	jobChan := make(chan *jobContext)
+	jobCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	segmentsToDelete := make([]string, 0)
+
+	for i := 1; i <= engine.compactorWorkerCount; i++ {
+		go func(ctx context.Context) {
+			for {
+				select {
+				case jobData := <-jobChan:
+					fmt.Println(fmt.Sprintf("received job for %s", jobData.segmentID))
+					latestLogEntries := make(map[string]*core.LogEntry)
+
+					for _, logEntryBytes := range jobData.logEntriesBytes {
+						if len(logEntryBytes) <= 0 {
+							continue
+						}
+
+						logEntry := &core.LogEntry{}
+						err := logEntry.Decode(logEntryBytes)
+
+						if err != nil {
+							continue
+						}
+
+						latestLogEntries[logEntry.Key] = logEntry
+					}
+
+					mu.Lock()
+					compactedSegmentEntries = append(compactedSegmentEntries, compactedSegmentEntriesContext{
+						compactedEntries: latestLogEntries,
+						timestamp:        jobData.timestamp,
+					})
+					mu.Unlock()
+
+					fmt.Println(fmt.Sprintf("completed job for %s", jobData.segmentID))
+					wg.Done()
+
+				case <-ctx.Done():
+					return
+				}
+			}
+		}(jobCtx)
+	}
+
+	for _, file := range files {
+		if !strings.Contains(file.Name(), ".segment") {
 			continue
 		}
 
-		var entriesByKey map[string]*core.LogEntry
-		for _, logEntries := range segmentLogEntries {
+		segmentID := strings.Split(file.Name(), ".")[0]
+		segmentContentBytes, err := ioutil.ReadFile(path.Join(getSegmentsPath(), file.Name()))
 
+		if err != nil {
+			return err
+		}
+
+		logEntriesBytes := bytes.Split(segmentContentBytes, LogEntrySeperator)
+
+		wg.Add(1)
+		jobChan <- &jobContext{
+			timestamp:       file.ModTime().Unix(),
+			logEntriesBytes: logEntriesBytes,
+			segmentID:       segmentID,
+		}
+		segmentsToDelete = append(segmentsToDelete, file.Name())
+	}
+
+	fmt.Println("waiting for jobs to complete")
+	wg.Wait()
+	fmt.Println("jobs completed")
+
+	sort.Slice(compactedSegmentEntries, func(a, b int) bool {
+		return compactedSegmentEntries[a].timestamp < compactedSegmentEntries[b].timestamp
+	})
+
+	compactedLogEntries := make(map[string]*core.LogEntry)
+
+	for _, compactedSegmentEntry := range compactedSegmentEntries {
+		for key, logEntry := range compactedSegmentEntry.compactedEntries {
+			compactedLogEntries[key] = logEntry
 		}
 	}
+
+	compactedSegment, err := newDataSegment()
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(compactedLogEntries)
+
+	for _, logEntry := range compactedLogEntries {
+		logEntryIndex, err := compactedSegment.addLogEntry(logEntry)
+		if err != nil {
+			return err
+		}
+
+		engine.addLogEntryIndex(logEntry.Key, logEntryIndex)
+	}
+
+	engine.segments = append(engine.segments, compactedSegment.id)
+	if err := compactedSegment.close(); err != nil {
+		return err
+	}
+
+	for _, segmentName := range segmentsToDelete {
+		os.Remove(path.Join(getSegmentsPath(), segmentName))
+	}
+
+	fmt.Println("completed segment compaction")
 
 	return nil
 }
@@ -389,24 +507,12 @@ func (engine *Engine) recover() error {
 }
 
 func NewEngine(config *EngineConfig) (*Engine, error) {
-	if _, err := os.Stat(getDataPath()); os.IsNotExist(err) {
-		err = os.MkdirAll(getDataPath(), 0644)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if _, err := os.Stat(getSegmentsPath()); os.IsNotExist(err) {
-		err = os.MkdirAll(getSegmentsPath(), 0644)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if _, err := os.Stat(getSnapshotsPath()); os.IsNotExist(err) {
-		err = os.MkdirAll(getSnapshotsPath(), 0644)
-		if err != nil {
-			return nil, err
+	for _, dataPath := range []string{getDataPath(), getSegmentsPath(), getSnapshotsPath()} {
+		if _, err := os.Stat(dataPath); os.IsNotExist(err) {
+			err = os.MkdirAll(dataPath, 0644)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -429,6 +535,7 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 		segments:                   []string{segment.id},
 		ctx:                        context.Background(),
 		compactorInterval:          config.CompactorInterval,
+		compactorWorkerCount:       config.CompactorWorkerCount,
 	}
 
 	recoverable, err := engine.isRecoverable()
@@ -445,6 +552,7 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 	}
 
 	go engine.captureSnapshots(engine.ctx, config.SnapshotInterval, config.TolerableSnapshotFailCount)
+	go engine.startCompactor(engine.ctx)
 
 	return engine, nil
 }
