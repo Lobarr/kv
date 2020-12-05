@@ -10,8 +10,10 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
+//ErEErrInvalidLogEntryChecksum occurs when a log entry is corrupted
 var ErrInvalidLogEntryChecksum = errors.New("log entry is corrupted")
 
+// computeCheckSum computes the cheksum of a key and it's associated value
 func computeCheckSum(key string, value string) uint32 {
 	keyHash := sha256.Sum256([]byte(key))
 	keyHashHex := hex.EncodeToString(keyHash[:])
@@ -22,17 +24,21 @@ func computeCheckSum(key string, value string) uint32 {
 	return checksum
 }
 
+//LogEntry represents an entry of a record intended to be saved in
+//the append-only log file
 type LogEntry struct {
-	Key       string
-	Value     string
-	Checksum  uint32
-	IsDeleted bool
+	Key       string // used as a reference to identify entry
+	Value     string // data to be saved
+	Checksum  uint32 // used to detect corrupted data
+	IsDeleted bool   // used to represent tombstone
 }
 
+// Encode encodes the log entry to bytes using msgpack
 func (le LogEntry) Encode() ([]byte, error) {
 	return msgpack.Marshal(&le)
 }
 
+// Decode decodes log entry bytes and loads the properties
 func (le *LogEntry) Decode(logEntryBytes []byte) error {
 	logEntry := &LogEntry{}
 	err := msgpack.Unmarshal(logEntryBytes, logEntry)
@@ -53,6 +59,7 @@ func (le *LogEntry) Decode(logEntryBytes []byte) error {
 	return nil
 }
 
+//NewLogEntry creates a new log entry
 func NewLogEntry(key string, value string) *LogEntry {
 	checksum := computeCheckSum(key, value)
 	return &LogEntry{

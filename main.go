@@ -16,6 +16,7 @@ func main() {
 		CacheSize:                  10,
 		CompactorInterval:          1 * time.Second,
 		CompactorWorkerCount:       3,
+    SnapshotTTLDuration: 10 * time.Second,
 	})
 
 	if err != nil {
@@ -23,7 +24,7 @@ func main() {
 	}
 
 	wg := new(sync.WaitGroup)
-	for i := 0; i < 500000; i++ {
+	for i := 0; i < 50000000; i++ {
 		go func(wg *sync.WaitGroup, id int) {
 			if err := engine.Set("some-key", "some-value"); err != nil {
 				fmt.Println(err)

@@ -12,20 +12,25 @@ import (
 	"github.com/google/uuid"
 )
 
+//ErrClosedDataSegment occurs when an attempt to write to a closed data segment is made
 var ErrClosedDataSegment = errors.New("data segment closed")
 
+//LogEntrySeperator represents seperator used between log entries on disk
 var LogEntrySeperator = []byte("\n")
 
+// dataSegment represents a portion of the data stored by the data store that
+// is bounded by an upper limit of number of entries
 type dataSegment struct {
-	entriesCount int
-	file         *os.File
-	fileName     string
-	id           string
-	isClosed     bool
-	mu           *sync.RWMutex
-	offset       int64
+	entriesCount int           // number of entries stored in the segment
+	file         *os.File      // open file descriptor of segment
+	fileName     string        // filename of segment on disk
+	id           string        // unique identifier of the segment
+	isClosed     bool          // indicator of state of data segment (open or closed)
+	mu           *sync.RWMutex // mutex used to synchronize access and avoid race conditions
+	offset       int64         // current latest offset to write new log entries
 }
 
+// addLogEntry adds a log entry to the data segment
 func (ds *dataSegment) addLogEntry(logEntry *core.LogEntry) (*core.LogEntryIndex, error) {
 	if ds.isClosed {
 		return nil, ErrClosedDataSegment
@@ -59,6 +64,7 @@ func (ds *dataSegment) addLogEntry(logEntry *core.LogEntry) (*core.LogEntryIndex
 	}, nil
 }
 
+// getLogEntry retrives the log entry from the data segment
 func (ds *dataSegment) getLogEntry(logEntryIndex *core.LogEntryIndex) (*core.LogEntry, error) {
 	ds.mu.RLock()
 	defer ds.mu.RUnlock()
@@ -80,6 +86,7 @@ func (ds *dataSegment) getLogEntry(logEntryIndex *core.LogEntryIndex) (*core.Log
 	return logEntry, nil
 }
 
+// close closes the data segment
 func (ds *dataSegment) close() error {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
@@ -93,10 +100,13 @@ func (ds *dataSegment) close() error {
 	return nil
 }
 
+// computeDataSegmentFileName computes filepath of data segment to be stored on
+// disk
 func computeDataSegmentFileName(id string) string {
 	return path.Join(getSegmentsPath(), fmt.Sprintf("%s.segment", id))
 }
 
+// newDataSegment create a new data segment
 func newDataSegment() (*dataSegment, error) {
 	id := uuid.New().String()
 	fileName := computeDataSegmentFileName(id)
@@ -117,6 +127,7 @@ func newDataSegment() (*dataSegment, error) {
 	}, nil
 }
 
+// loadDataSegment loads data segment from disk to memory
 func loadDataSegment(id string) (*dataSegment, error) {
 	fileName := computeDataSegmentFileName(id)
 	file, err := os.Open(fileName)
