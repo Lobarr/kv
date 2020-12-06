@@ -97,7 +97,7 @@ func (engine *Engine) checkDataSegment() error {
 		engine.segment = newDataSegment
 		engine.segments = append(engine.segments, newDataSegment.id)
 
-		fmt.Println("switched to new segment")
+		//fmt.Println("switched to new segment")
 	}
 	return nil
 }
@@ -209,6 +209,10 @@ func (engine *Engine) Get(key string) (string, error) {
 // Delete deletes a key by appending a tombstone log entry to the latest data
 // segment
 func (engine *Engine) Delete(key string) error {
+	//fmt.Println(engine)
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+
 	engine.checkDataSegment()
 	logEntry, err := engine.findLogEntryByKey(key)
 
@@ -333,7 +337,7 @@ func (engine *Engine) compactSegments() error {
 		id       string
 	}
 
-	fmt.Println("starting segments compaction")
+	//fmt.Println("starting segments compaction")
 
 	files, err := ioutil.ReadDir(getSegmentsPath())
 	if err != nil {
@@ -354,7 +358,7 @@ func (engine *Engine) compactSegments() error {
 			for {
 				select {
 				case jobData := <-jobChan:
-					fmt.Println(fmt.Sprintf("received job for %s", jobData.segmentID))
+					//fmt.Println(fmt.Sprintf("received job for %s", jobData.segmentID))
 					latestLogEntries := make(map[string]*core.LogEntry)
 
 					for _, logEntryBytes := range jobData.logEntriesBytes {
@@ -379,7 +383,7 @@ func (engine *Engine) compactSegments() error {
 					})
 					mu.Unlock()
 
-					fmt.Println(fmt.Sprintf("completed job for %s", jobData.segmentID))
+					//fmt.Println(fmt.Sprintf("completed job for %s", jobData.segmentID))
 					wg.Done()
 
 				case <-ctx.Done():
@@ -416,9 +420,9 @@ func (engine *Engine) compactSegments() error {
 		})
 	}
 
-	fmt.Println("waiting for jobs to complete")
+	//fmt.Println("waiting for jobs to complete")
 	wg.Wait()
-	fmt.Println("jobs completed")
+	//fmt.Println("jobs completed")
 
 	compactedLogEntries := make(map[string]*core.LogEntry)
 
@@ -446,9 +450,7 @@ func (engine *Engine) compactSegments() error {
 			return err
 		}
 
-		//engine.mu.Lock()
 		engine.addLogEntryIndex(logEntry.Key, logEntryIndex)
-		//engine.mu.Unlock()
 	}
 
 	engine.segments = append(engine.segments, compactedSegment.id)
@@ -458,21 +460,22 @@ func (engine *Engine) compactSegments() error {
 
 	// clean up segment references from memory
 	for _, segmentCtx := range segmentsToDelete {
-		//engine.mu.Lock()
 		delete(engine.logEntryIndexesBySegmentID, segmentCtx.id)
-		//engine.mu.Unlock()
-
 		os.Remove(path.Join(getSegmentsPath(), segmentCtx.fileName))
 	}
 
-	fmt.Println("completed segment compaction")
+	//fmt.Println("completed segment compaction")
 
 	return nil
 }
 
 // compactSnapshots compacts snapshots
 func (engine *Engine) compactSnapshots() error {
+	//fmt.Println("started snapshot compaction")
+
+	deletedCount := 0
 	now := time.Now()
+
 	files, err := ioutil.ReadDir(getSnapshotsPath())
 	if err != nil {
 		return err
@@ -480,9 +483,12 @@ func (engine *Engine) compactSnapshots() error {
 
 	for _, file := range files {
 		if now.Sub(file.ModTime()) > engine.snapshotTTLDuration {
+			deletedCount++
 			os.Remove(path.Join(getSnapshotsPath(), file.Name()))
 		}
 	}
+
+	//fmt.Printf("deleted %d snapshots \n", deletedCount)
 
 	return nil
 }
@@ -571,7 +577,7 @@ func (engine *Engine) recover() error {
 func NewEngine(config *EngineConfig) (*Engine, error) {
 	for _, dataPath := range []string{getDataPath(), getSegmentsPath(), getSnapshotsPath()} {
 		if _, err := os.Stat(dataPath); os.IsNotExist(err) {
-			err = os.MkdirAll(dataPath, 0644)
+			err = os.MkdirAll(dataPath, 0777)
 			if err != nil {
 				return nil, err
 			}
@@ -607,11 +613,11 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 	}
 
 	if recoverable {
-		fmt.Println("recovering database")
+		//fmt.Println("recovering database")
 		if err = engine.recover(); err != nil {
 			return nil, err
 		}
-		fmt.Println("recovered database")
+		//fmt.Println("recovered database")
 	}
 
 	go engine.captureSnapshots(engine.ctx, config.SnapshotInterval, config.TolerableSnapshotFailCount)
