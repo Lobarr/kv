@@ -1,4 +1,4 @@
-package hashindex
+package core_test 
 
 import (
 	"math/rand"
@@ -16,10 +16,10 @@ func randomString(n int) string {
 	return string(s)
 }
 
-func benchmarkSet(n int, engine *Engine, b *testing.B) {
+func benchmarkSet(valueSize int, engine *Engine, b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		key := randomString(rand.Intn(30))
-		value := randomString(n)
+		value := randomString(valueSize)
 
 		if err := engine.Set(key, value); err != nil {
 			b.Fatal(err)
@@ -27,18 +27,15 @@ func benchmarkSet(n int, engine *Engine, b *testing.B) {
 	}
 }
 
-func benchmarkGet(n int, engine *Engine, b *testing.B) {
+func benchmarkGet(valueSize int, engine *Engine, b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		value := randomString(n)
+		value := randomString(valueSize)
 		key := randomString(rand.Intn(30))
-		err := engine.Set(key, value)
-
-		if err != nil {
+		if err := engine.Set(key, value); err != nil {
 			b.Fatal(err)
 		}
 
-		_, err = engine.Get(key)
-		if err != nil {
+		if _, err := engine.Get(key); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -47,10 +44,10 @@ func benchmarkGet(n int, engine *Engine, b *testing.B) {
 func makeEngine(t testing.TB) (*Engine, error) {
 	return NewEngine(&EngineConfig{
 		SegmentMaxSize:             100,
-		SnapshotInterval:           2 * time.Second,
+		SnapshotInterval:           4 * time.Second,
 		TolerableSnapshotFailCount: 5,
 		CacheSize:                  3,
-		CompactorInterval:          3 * time.Second,
+		CompactorInterval:          5 * time.Second,
 		CompactorWorkerCount:       2,
 		SnapshotTTLDuration:        5 * time.Second,
 	})

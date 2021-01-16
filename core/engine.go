@@ -1,4 +1,4 @@
-package hashindex
+package core 
 
 import (
 	"bytes"
@@ -234,14 +234,14 @@ func (engine *Engine) Delete(key string) error {
 }
 
 // Close closes the storage engine
-func (engine *Engine) Close() error {	
+func (engine *Engine) Close() error {
 	if err := engine.segment.close(); err != nil {
 		return err
 	}
 
-  if err := engine.snapshot(); err != nil {
-    return err
-  }
+	if err := engine.snapshot(); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -321,24 +321,25 @@ func (engine *Engine) isRecoverable() (bool, error) {
 	return false, nil
 }
 
+type compactedSegmentEntriesContext struct {
+	compactedEntries map[string]*core.LogEntry // key to log entry
+	timestamp        int64
+}
+
+type jobContext struct {
+	timestamp       int64
+	segmentID       string
+	logEntriesBytes [][]byte
+}
+
+type segmentContext struct {
+	fileName string
+	id       string
+}
+
 // compactSegments compacts data segments by joining closed segments together
 // and getting rid of duplicaate log engtries by keys
 func (engine *Engine) compactSegments() error {
-	type compactedSegmentEntriesContext struct {
-		compactedEntries map[string]*core.LogEntry // key to log entry
-		timestamp        int64
-	}
-
-	type jobContext struct {
-		timestamp       int64
-		segmentID       string
-		logEntriesBytes [][]byte
-	}
-
-	type segmentContext struct {
-		fileName string
-		id       string
-	}
 
 	//fmt.Println("starting segments compaction")
 
@@ -497,7 +498,7 @@ func (engine *Engine) compactSnapshots() error {
 }
 
 // startCompactor start segment and snspshot compaaction go routines
-func (engine *Engine) startCompactor(ctx context.Context) error {
+func (engine *Engine) startCompactors(ctx context.Context) error {
 	errChan := make(chan error, 1)
 
 	// segment compactor
@@ -624,7 +625,7 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 	}
 
 	go engine.captureSnapshots(engine.ctx, config.SnapshotInterval, config.TolerableSnapshotFailCount)
-	go engine.startCompactor(engine.ctx)
+	go engine.startCompactors(engine.ctx)
 
 	return engine, nil
 }
