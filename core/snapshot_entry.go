@@ -1,4 +1,4 @@
-package hashindex
+package core
 
 import (
 	"crypto/sha256"

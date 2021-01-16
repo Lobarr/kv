@@ -2,14 +2,14 @@ package main
 
 import (
 	"fmt"
-	"storage-engines/engines/hashindex"
+	"kv/core"
 	"sync"
 	"time"
 )
 
 func main() {
 	//TODO: add actual tests
-	engine, err := hashindex.NewEngine(&hashindex.EngineConfig{
+	engine, err := core.NewEngine(&core.EngineConfig{
 		SegmentMaxSize:             2000,
 		SnapshotInterval:           2 * time.Second,
 		TolerableSnapshotFailCount: 5,

@@ -1,4 +1,4 @@
-module storage-engines
+module kv
 
 go 1.15
 

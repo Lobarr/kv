@@ -1,4 +1,4 @@
-package hashindex
+package core
 
 import (
 	"bytes"
@@ -9,7 +9,6 @@ import (
 	"os"
 	"path"
 	"sort"
-	"storage-engines/core"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,7 +22,7 @@ import (
 var ErrKeyNotFound = errors.New("key not found")
 
 // logEntryIndexByKey map that holds log entries by the associated key
-type logEntryIndexByKey map[string]*core.LogEntryIndex
+type logEntryIndexByKey map[string]*LogEntryIndex
 
 // Engine thread safe storage engine that uses the hash index strategy for keeping track
 // where data is located on disk
@@ -103,7 +102,7 @@ func (engine *Engine) checkDataSegment() error {
 }
 
 // addLogEntryIndex stores log entry index in memory
-func (engine *Engine) addLogEntryIndex(key string, logEntryIndex *core.LogEntryIndex) {
+func (engine *Engine) addLogEntryIndex(key string, logEntryIndex *LogEntryIndex) {
 	_, ok := engine.logEntryIndexesBySegmentID[engine.segment.id]
 
 	if !ok {
@@ -124,7 +123,7 @@ func (engine *Engine) Set(key, value string) error {
 		return err
 	}
 
-	logEntry := core.NewLogEntry(key, value)
+	logEntry := NewLogEntry(key, value)
 	logEntryIndex, err := engine.segment.addLogEntry(logEntry)
 
 	if err != nil {
@@ -158,7 +157,7 @@ func (engine *Engine) loadSegment(segmentID string) (*dataSegment, error) {
 
 // findLogEntryByKey locates the log entry of provided key by locating
 // the latest data segment containing that kejjy
-func (engine *Engine) findLogEntryByKey(key string) (*core.LogEntry, error) {
+func (engine *Engine) findLogEntryByKey(key string) (*LogEntry, error) {
 	var segment *dataSegment
 	cursor := len(engine.segments) - 1
 
@@ -234,14 +233,14 @@ func (engine *Engine) Delete(key string) error {
 }
 
 // Close closes the storage engine
-func (engine *Engine) Close() error {	
+func (engine *Engine) Close() error {
 	if err := engine.segment.close(); err != nil {
 		return err
 	}
 
-  if err := engine.snapshot(); err != nil {
-    return err
-  }
+	if err := engine.snapshot(); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -321,24 +320,25 @@ func (engine *Engine) isRecoverable() (bool, error) {
 	return false, nil
 }
 
+type compactedSegmentEntriesContext struct {
+	compactedEntries map[string]*LogEntry // key to log entry
+	timestamp        int64
+}
+
+type jobContext struct {
+	timestamp       int64
+	segmentID       string
+	logEntriesBytes [][]byte
+}
+
+type segmentContext struct {
+	fileName string
+	id       string
+}
+
 // compactSegments compacts data segments by joining closed segments together
 // and getting rid of duplicaate log engtries by keys
 func (engine *Engine) compactSegments() error {
-	type compactedSegmentEntriesContext struct {
-		compactedEntries map[string]*core.LogEntry // key to log entry
-		timestamp        int64
-	}
-
-	type jobContext struct {
-		timestamp       int64
-		segmentID       string
-		logEntriesBytes [][]byte
-	}
-
-	type segmentContext struct {
-		fileName string
-		id       string
-	}
 
 	//fmt.Println("starting segments compaction")
 
@@ -362,14 +362,14 @@ func (engine *Engine) compactSegments() error {
 				select {
 				case jobData := <-jobChan:
 					//fmt.Println(fmt.Sprintf("received job for %s", jobData.segmentID))
-					latestLogEntries := make(map[string]*core.LogEntry)
+					latestLogEntries := make(map[string]*LogEntry)
 
 					for _, logEntryBytes := range jobData.logEntriesBytes {
 						if len(logEntryBytes) <= 0 {
 							continue
 						}
 
-						logEntry := &core.LogEntry{}
+						logEntry := &LogEntry{}
 						err := logEntry.Decode(logEntryBytes)
 
 						if err != nil {
@@ -427,7 +427,7 @@ func (engine *Engine) compactSegments() error {
 	wg.Wait()
 	//fmt.Println("jobs completed")
 
-	compactedLogEntries := make(map[string]*core.LogEntry)
+	compactedLogEntries := make(map[string]*LogEntry)
 
 	// sorts compacted segment entries by timestamp in order to have the latest
 	// keys updated last
@@ -497,7 +497,7 @@ func (engine *Engine) compactSnapshots() error {
 }
 
 // startCompactor start segment and snspshot compaaction go routines
-func (engine *Engine) startCompactor(ctx context.Context) error {
+func (engine *Engine) startCompactors(ctx context.Context) error {
 	errChan := make(chan error, 1)
 
 	// segment compactor
@@ -624,7 +624,7 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 	}
 
 	go engine.captureSnapshots(engine.ctx, config.SnapshotInterval, config.TolerableSnapshotFailCount)
-	go engine.startCompactor(engine.ctx)
+	go engine.startCompactors(engine.ctx)
 
 	return engine, nil
 }
