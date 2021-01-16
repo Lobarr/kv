@@ -5,5 +5,6 @@ lint:
 	gofmt -d .
 
 test:
+	rm -rf ./core/tmp/
 	go test ./core
 	go test ./core -bench=.

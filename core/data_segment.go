@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 )
 
 //ErrClosedDataSegment occurs when an attempt to write to a closed data segment is made
@@ -27,10 +28,13 @@ type dataSegment struct {
 	isClosed     bool          // indicator of state of data segment (open or closed)
 	mu           *sync.RWMutex // mutex used to synchronize access and avoid race conditions
 	offset       int64         // current latest offset to write new log entries
+	logger       log.FieldLogger
 }
 
 // addLogEntry adds a log entry to the data segment
 func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
+	ds.logger.Debugf("adding log entry %s to segment", logEntry.Key)
+
 	if ds.isClosed {
 		return nil, ErrClosedDataSegment
 	}
@@ -55,6 +59,8 @@ func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 	ds.offset += int64(bytesWrittenSize)
 	ds.entriesCount++
 
+	ds.logger.Debugf("new data segment state : offset = %d entriesCount = %d", ds.offset, ds.entriesCount)
+
 	return &LogEntryIndex{
 		Key:             logEntry.Key,
 		EntrySize:       bytesWrittenSize,
@@ -67,6 +73,8 @@ func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 func (ds *dataSegment) getLogEntry(logEntryIndex *LogEntryIndex) (*LogEntry, error) {
 	ds.mu.RLock()
 	defer ds.mu.RUnlock()
+
+	ds.logger.Debugf("retrieving log entry for key %s", logEntryIndex.Key)
 
 	logEntry := &LogEntry{}
 	logEntryBytes := make([]byte, logEntryIndex.EntrySize)
@@ -89,6 +97,8 @@ func (ds *dataSegment) getLogEntry(logEntryIndex *LogEntryIndex) (*LogEntry, err
 func (ds *dataSegment) close() error {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
+
+	ds.logger.Debug("closing data segment")
 
 	if err := ds.file.Close(); err != nil {
 		return err
@@ -123,6 +133,10 @@ func newDataSegment() (*dataSegment, error) {
 		isClosed:     false,
 		offset:       0,
 		mu:           new(sync.RWMutex),
+		logger: log.WithFields(log.Fields{
+			"fileName": fileName,
+			"id":       id,
+		}),
 	}, nil
 }
 
@@ -143,5 +157,9 @@ func loadDataSegment(id string) (*dataSegment, error) {
 		isClosed:     true,
 		offset:       -1,
 		mu:           new(sync.RWMutex),
+		logger: log.WithFields(log.Fields{
+			"fileName": fileName,
+			"id":       id,
+		}),
 	}, nil
 }
