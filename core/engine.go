@@ -15,6 +15,7 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
+	log "github.com/sirupsen/logrus"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -39,7 +40,8 @@ type Engine struct {
 	isCompactingSegments       bool                          // flag that ensures only one segments compaction process is running at a time
 	isCompactingSnapshots      bool                          // flag that ensures only one snapshots compaction process is running at a time
 
-	ctx context.Context
+	logger log.FieldLogger
+	ctx    context.Context
 }
 
 // EngineConfig configuration properties utilized when initializing an engine
@@ -55,6 +57,8 @@ type EngineConfig struct {
 
 // captureSnapshots captures snapshots at an interval
 func (engine *Engine) captureSnapshots(ctx context.Context, interval time.Duration, tolerableFailCount int) {
+	engine.logger.Debugf("starting snapshots taker process with interval %v and tolerableFailCount %d", interval, tolerableFailCount)
+
 	failCounts := 0
 	for {
 		if failCounts >= tolerableFailCount {
@@ -81,6 +85,7 @@ func (engine *Engine) captureSnapshots(ctx context.Context, interval time.Durati
 // this method is expected to be used within a writable thread safe method
 func (engine *Engine) checkDataSegment() error {
 	if engine.segment.entriesCount >= engine.segmentMaxSize {
+
 		// switch to new segment
 		if err := engine.segment.close(); err != nil {
 			return err
@@ -99,13 +104,15 @@ func (engine *Engine) checkDataSegment() error {
 		engine.segment = newDataSegment
 		engine.segments = append(engine.segments, newDataSegment.id)
 
-		//fmt.Println("switched to new segment")
+		engine.logger.Debugf("switched to new data segment with id %s", newDataSegment.id)
 	}
 	return nil
 }
 
 // addLogEntryIndex stores log entry index in memory
 func (engine *Engine) addLogEntryIndex(key string, logEntryIndex *LogEntryIndex) {
+	engine.logger.Debugf("adding log entry index for key %s", key)
+
 	_, ok := engine.logEntryIndexesBySegmentID[engine.segment.id]
 
 	if !ok {
@@ -119,6 +126,8 @@ func (engine *Engine) addLogEntryIndex(key string, logEntryIndex *LogEntryIndex)
 func (engine *Engine) Set(key, value string) error {
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
+
+	engine.logger.Debugf("setting key %s and value %s", key, value)
 
 	err := engine.checkDataSegment()
 
@@ -151,8 +160,12 @@ func (engine *Engine) loadSegment(segmentID string) (*dataSegment, error) {
 
 		segment = loadedSegment
 		engine.lruSegments.Add(segmentID, segment)
+
+		engine.logger.Debugf("loaded data segment %s from disk and added to cache", segmentID)
 	} else {
 		segment = cacheHit.(*dataSegment)
+
+		engine.logger.Debugf("loaded data segment %s from cache", segmentID)
 	}
 
 	return segment, nil
@@ -161,6 +174,8 @@ func (engine *Engine) loadSegment(segmentID string) (*dataSegment, error) {
 // findLogEntryByKey locates the log entry of provided key by locating
 // the latest data segment containing that kejjy
 func (engine *Engine) findLogEntryByKey(key string) (*LogEntry, error) {
+	engine.logger.Debugf("searching log entry for key %s", key)
+
 	var segment *dataSegment
 	cursor := len(engine.segments) - 1
 
@@ -193,6 +208,8 @@ func (engine *Engine) findLogEntryByKey(key string) (*LogEntry, error) {
 
 // Get retrieves stored value for associated key
 func (engine *Engine) Get(key string) (string, error) {
+	engine.logger.Debugf("getting key %s", key)
+
 	engine.mu.RLock()
 	defer engine.mu.RUnlock()
 
@@ -211,7 +228,8 @@ func (engine *Engine) Get(key string) (string, error) {
 // Delete deletes a key by appending a tombstone log entry to the latest data
 // segment
 func (engine *Engine) Delete(key string) error {
-	//fmt.Println(engine)
+	engine.logger.Debugf("deleting key %s", key)
+
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
 
@@ -237,6 +255,7 @@ func (engine *Engine) Delete(key string) error {
 
 // Close closes the storage engine
 func (engine *Engine) Close() error {
+	engine.logger.Debug("closing database")
 
 	if err := engine.segment.close(); err != nil {
 		return err
@@ -253,6 +272,8 @@ func (engine *Engine) Close() error {
 
 // snapshot writes a snapshot of log entry indexes by segment id to disk
 func (engine *Engine) snapshot() error {
+	engine.logger.Debug("snapshotting database state")
+
 	snapshotEntry, err := newSnapshotEntry(engine.logEntryIndexesBySegmentID)
 	if err != nil {
 		return err
@@ -281,6 +302,8 @@ func (engine *Engine) snapshot() error {
 
 // loadSnapshot loads snapshot from disk to memory
 func (engine *Engine) loadSnapshot(fileName string) error {
+	engine.logger.Debugf("loading snapshot %s", fileName)
+
 	snapshotBytes, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		return err
@@ -308,6 +331,8 @@ func (engine *Engine) loadSnapshot(fileName string) error {
 // isRecoverable checkes if storage engine contains existing data of which's logn
 // entry indexes can be recovered
 func (engine *Engine) isRecoverable() (bool, error) {
+	engine.logger.Debug("checking if databasae is reecoverable")
+
 	files, err := ioutil.ReadDir(getSnapshotsPath())
 	if err != nil {
 		return false, err
@@ -345,6 +370,8 @@ type segmentContext struct {
 // compactSegments compacts data segments by joining closed segments together
 // and getting rid of duplicaate log engtries by keys
 func (engine *Engine) compactSegments() error {
+	engine.logger.Debug("compacting segments")
+
 	files, err := ioutil.ReadDir(getSegmentsPath())
 	if err != nil {
 		return err
@@ -360,14 +387,17 @@ func (engine *Engine) compactSegments() error {
 
 	// start compaction workers
 	for i := 1; i <= engine.compactorWorkerCount; i++ {
-		go func(ctx context.Context) {
+		engine.logger.Debugf("starting compaction worker %d", i)
+
+		go func(ctx context.Context, workerId int) {
 			for {
 				select {
 				case <-ctx.Done():
 					return
 
 				case jobData := <-jobChan:
-					//fmt.Println(fmt.Sprintf("received job for %s", jobData.segmentID))
+					engine.logger.Debugf("worker %d received job for %s", workerId, jobData.segmentID)
+
 					latestLogEntries := make(map[string]*LogEntry)
 
 					for _, logEntryBytes := range jobData.logEntriesBytes {
@@ -394,7 +424,7 @@ func (engine *Engine) compactSegments() error {
 					wg.Done()
 				}
 			}
-		}(jobCtx)
+		}(jobCtx, i)
 	}
 
 	// send compaction jobs to workers through shared channel
@@ -471,7 +501,7 @@ func (engine *Engine) compactSegments() error {
 
 // compactSnapshots compacts snapshots
 func (engine *Engine) compactSnapshots() error {
-	//fmt.Println("started snapshot compaction")
+	engine.logger.Debug("compacting snapshots")
 
 	deletedCount := 0
 	now := time.Now()
@@ -488,13 +518,15 @@ func (engine *Engine) compactSnapshots() error {
 		}
 	}
 
-	//fmt.Printf("deleted %d snapshots \n", deletedCount)
+	engine.logger.Debugf("deleted %d snapshots \n", deletedCount)
 
 	return nil
 }
 
 // startCompactor start segment and snspshot compaaction go routines
 func (engine *Engine) startCompactors(ctx context.Context) error {
+	engine.logger.Debug("starting compactor processes")
+
 	ticker := time.NewTicker(engine.compactorInterval)
 	errChan := make(chan error, 1)
 
@@ -503,7 +535,7 @@ func (engine *Engine) startCompactors(ctx context.Context) error {
 		for {
 			select {
 			case <-ctx.Done():
-				fmt.Println("stopping compactor process")
+				engine.logger.Debug("stopping segments compactor process")
 				return
 
 			case <-ticker.C:
@@ -516,8 +548,6 @@ func (engine *Engine) startCompactors(ctx context.Context) error {
 					}
 
 					engine.isCompactingSegments = false
-				} else {
-					fmt.Println("double segments compaction mitigated")
 				}
 				engine.mu.Unlock()
 			}
@@ -529,7 +559,7 @@ func (engine *Engine) startCompactors(ctx context.Context) error {
 		for {
 			select {
 			case <-ctx.Done():
-				fmt.Println("stopping compactor process")
+				engine.logger.Debug("stopping snapshots compactor process")
 				return
 
 			case <-ticker.C:
@@ -557,6 +587,8 @@ func (engine *Engine) startCompactors(ctx context.Context) error {
 
 // recover recovers database indexes from snapshots
 func (engine *Engine) recover() error {
+	engine.logger.Debug("recovering database state from snapshots")
+
 	files, err := ioutil.ReadDir(getSnapshotsPath())
 	if err != nil {
 		return err
@@ -627,7 +659,10 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 		snapshotTTLDuration:        config.SnapshotTTLDuration,
 		isCompactingSegments:       false,
 		isCompactingSnapshots:      false,
+		logger:                     log.NewEntry(log.New()),
 	}
+
+	engine.logger.Info("attempting to recover database")
 
 	recoverable, err := engine.isRecoverable()
 	if err != nil {
@@ -635,11 +670,11 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 	}
 
 	if recoverable {
-		//fmt.Println("recovering database")
 		if err = engine.recover(); err != nil {
 			return nil, err
 		}
-		//fmt.Println("recovered database")
+
+		engine.logger.Info("successfully recovered database")
 	}
 
 	go engine.captureSnapshots(engine.ctx, config.SnapshotInterval, config.TolerableSnapshotFailCount)

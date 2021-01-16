@@ -3,10 +3,19 @@ package core_test
 import (
 	"kv/core"
 	"math/rand"
+	"os"
 	"sync"
 	"testing"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
+
+func init() {
+	log.SetLevel(log.DebugLevel)
+	//log.SetFormatter(&log.JSONFormatter{})
+	log.SetOutput(os.Stdout)
+}
 
 func randomString(n int) string {
 	letters := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")

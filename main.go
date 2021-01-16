@@ -8,7 +8,6 @@ import (
 )
 
 func main() {
-	//TODO: add actual tests
 	engine, err := core.NewEngine(&core.EngineConfig{
 		SegmentMaxSize:             2000,
 		SnapshotInterval:           2 * time.Second,
@@ -24,9 +23,9 @@ func main() {
 	}
 
 	wg := new(sync.WaitGroup)
-	for i := 0; i < 500; i++ {
-		go func(wg *sync.WaitGroup, id int) {
-			for i := 0; i < 100; i++ {
+	for i := 0; i < 10; i++ {
+		go func(wg *sync.WaitGroup) {
+			for i := 0; i < 50; i++ {
 				if err := engine.Set("some-key", "some-value"); err != nil {
 					fmt.Println(err)
 				}
@@ -38,11 +37,13 @@ func main() {
 				}
 			}
 			wg.Done()
-		}(wg, i)
+		}(wg)
 		wg.Add(1)
 	}
 
 	wg.Wait()
+	fmt.Println("done waiting")
+
 	value, _ := engine.Get("some-key")
 	jsonValue, _ := engine.Get("json")
 
