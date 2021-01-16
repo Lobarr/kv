@@ -36,7 +36,10 @@ type Engine struct {
 	mu                         *sync.RWMutex                 // mutex that synchronizes access to properties
 	compactorWorkerCount       int                           // number of workers compaction process uses
 	snapshotTTLDuration        time.Duration                 // snapshot files time to live duration
-	ctx                        context.Context
+	isCompactingSegments       bool                          // flag that ensures only one segments compaction process is running at a time
+	isCompactingSnapshots      bool                          // flag that ensures only one snapshots compaction process is running at a time
+
+	ctx context.Context
 }
 
 // EngineConfig configuration properties utilized when initializing an engine
@@ -234,6 +237,7 @@ func (engine *Engine) Delete(key string) error {
 
 // Close closes the storage engine
 func (engine *Engine) Close() error {
+
 	if err := engine.segment.close(); err != nil {
 		return err
 	}
@@ -241,6 +245,8 @@ func (engine *Engine) Close() error {
 	if err := engine.snapshot(); err != nil {
 		return err
 	}
+
+	engine.ctx.Done()
 
 	return nil
 }
@@ -339,9 +345,6 @@ type segmentContext struct {
 // compactSegments compacts data segments by joining closed segments together
 // and getting rid of duplicaate log engtries by keys
 func (engine *Engine) compactSegments() error {
-
-	//fmt.Println("starting segments compaction")
-
 	files, err := ioutil.ReadDir(getSegmentsPath())
 	if err != nil {
 		return err
@@ -360,6 +363,9 @@ func (engine *Engine) compactSegments() error {
 		go func(ctx context.Context) {
 			for {
 				select {
+				case <-ctx.Done():
+					return
+
 				case jobData := <-jobChan:
 					//fmt.Println(fmt.Sprintf("received job for %s", jobData.segmentID))
 					latestLogEntries := make(map[string]*LogEntry)
@@ -385,12 +391,7 @@ func (engine *Engine) compactSegments() error {
 						timestamp:        jobData.timestamp,
 					})
 					mu.Unlock()
-
-					//fmt.Println(fmt.Sprintf("completed job for %s", jobData.segmentID))
 					wg.Done()
-
-				case <-ctx.Done():
-					return
 				}
 			}
 		}(jobCtx)
@@ -423,9 +424,7 @@ func (engine *Engine) compactSegments() error {
 		})
 	}
 
-	//fmt.Println("waiting for jobs to complete")
 	wg.Wait()
-	//fmt.Println("jobs completed")
 
 	compactedLogEntries := make(map[string]*LogEntry)
 
@@ -467,8 +466,6 @@ func (engine *Engine) compactSegments() error {
 		os.Remove(path.Join(getSegmentsPath(), segmentCtx.fileName))
 	}
 
-	//fmt.Println("completed segment compaction")
-
 	return nil
 }
 
@@ -498,20 +495,31 @@ func (engine *Engine) compactSnapshots() error {
 
 // startCompactor start segment and snspshot compaaction go routines
 func (engine *Engine) startCompactors(ctx context.Context) error {
+	ticker := time.NewTicker(engine.compactorInterval)
 	errChan := make(chan error, 1)
 
 	// segment compactor
 	go func() {
 		for {
 			select {
-			case <-time.Tick(engine.compactorInterval):
+			case <-ctx.Done():
+				fmt.Println("stopping compactor process")
+				return
+
+			case <-ticker.C:
 				engine.mu.Lock()
-				if err := engine.compactSegments(); err != nil {
-					errChan <- err
+				if engine.isCompactingSegments == false {
+					engine.isCompactingSegments = true
+
+					if err := engine.compactSegments(); err != nil {
+						errChan <- err
+					}
+
+					engine.isCompactingSegments = false
+				} else {
+					fmt.Println("double segments compaction mitigated")
 				}
 				engine.mu.Unlock()
-			case <-ctx.Done():
-				return
 			}
 		}
 	}()
@@ -520,21 +528,30 @@ func (engine *Engine) startCompactors(ctx context.Context) error {
 	go func() {
 		for {
 			select {
-			case <-time.Tick(engine.compactorInterval):
-				if err := engine.compactSnapshots(); err != nil {
-					errChan <- err
-				}
 			case <-ctx.Done():
+				fmt.Println("stopping compactor process")
 				return
+
+			case <-ticker.C:
+				if engine.isCompactingSnapshots == false {
+					engine.isCompactingSnapshots = true
+
+					if err := engine.compactSnapshots(); err != nil {
+						errChan <- err
+					}
+
+					engine.isCompactingSnapshots = false
+				}
 			}
 		}
 	}()
 
 	select {
-	case err := <-errChan:
-		panic(fmt.Sprintf("compactor error %s", err))
 	case <-ctx.Done():
 		return nil
+
+	case err := <-errChan:
+		panic(fmt.Sprintf("compactor error %s", err))
 	}
 }
 
@@ -608,6 +625,8 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 		compactorInterval:          config.CompactorInterval,
 		compactorWorkerCount:       config.CompactorWorkerCount,
 		snapshotTTLDuration:        config.SnapshotTTLDuration,
+		isCompactingSegments:       false,
+		isCompactingSnapshots:      false,
 	}
 
 	recoverable, err := engine.isRecoverable()

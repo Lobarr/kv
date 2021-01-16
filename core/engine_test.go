@@ -45,80 +45,54 @@ func benchmarkGet(valueSize int, engine *core.Engine, b *testing.B) {
 
 func makeEngine(t testing.TB) (*core.Engine, error) {
 	return core.NewEngine(&core.EngineConfig{
-		SegmentMaxSize:             100,
-		SnapshotInterval:           4 * time.Second,
+		SegmentMaxSize:             1000,
+		SnapshotInterval:           5 * time.Second,
 		TolerableSnapshotFailCount: 5,
-		CacheSize:                  3,
-		CompactorInterval:          5 * time.Second,
-		CompactorWorkerCount:       2,
-		SnapshotTTLDuration:        5 * time.Second,
+		CacheSize:                  5,
+		CompactorInterval:          3 * time.Second,
+		CompactorWorkerCount:       3,
+		SnapshotTTLDuration:        10 * time.Second,
 	})
 }
 
-func BenchmarkSet50(b *testing.B) {
+func BenchmarkSet(b *testing.B) {
 	engine, err := makeEngine(b)
-	defer engine.Close()
 
 	if err != nil {
 		b.Fatal(err)
 	}
 
-	benchmarkSet(50, engine, b)
+	defer engine.Close()
+
+	b.Run("50", func(b *testing.B) {
+		benchmarkSet(50, engine, b)
+	})
+	b.Run("500", func(b *testing.B) {
+		benchmarkSet(500, engine, b)
+	})
+	b.Run("1000", func(b *testing.B) {
+		benchmarkSet(1000, engine, b)
+	})
 }
 
-func BenchmarkSet500(b *testing.B) {
+func BenchmarkGet(b *testing.B) {
 	engine, err := makeEngine(b)
-	defer engine.Close()
 
 	if err != nil {
 		b.Fatal(err)
 	}
 
-	benchmarkSet(500, engine, b)
-}
-
-func BenchmarkSet1000(b *testing.B) {
-	engine, err := makeEngine(b)
 	defer engine.Close()
 
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	benchmarkSet(1000, engine, b)
-}
-
-func BenchmarkGet50(b *testing.B) {
-	engine, err := makeEngine(b)
-	defer engine.Close()
-
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	benchmarkGet(50, engine, b)
-}
-
-func BenchmarkGet500(b *testing.B) {
-	engine, err := makeEngine(b)
-	defer engine.Close()
-
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	benchmarkGet(500, engine, b)
-}
-
-func BenchmarkGet1000(b *testing.B) {
-	engine, err := makeEngine(b)
-	defer engine.Close()
-
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	benchmarkGet(1000, engine, b)
+	b.Run("50", func(b *testing.B) {
+		benchmarkGet(50, engine, b)
+	})
+	b.Run("500", func(b *testing.B) {
+		benchmarkGet(500, engine, b)
+	})
+	b.Run("1000", func(b *testing.B) {
+		benchmarkGet(1000, engine, b)
+	})
 }
 
 func TestConcurrentWrites(t *testing.T) {
@@ -128,6 +102,7 @@ func TestConcurrentWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	wg := new(sync.WaitGroup)
 	for i := 0; i < 50; i++ {
 		go func(wg *sync.WaitGroup, id int) {
