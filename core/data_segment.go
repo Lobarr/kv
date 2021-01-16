@@ -1,4 +1,4 @@
-package core 
+package core
 
 import (
 	"bytes"
@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"storage-engines/core"
 	"sync"
 
 	"github.com/google/uuid"
@@ -31,7 +30,7 @@ type dataSegment struct {
 }
 
 // addLogEntry adds a log entry to the data segment
-func (ds *dataSegment) addLogEntry(logEntry *core.LogEntry) (*core.LogEntryIndex, error) {
+func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 	if ds.isClosed {
 		return nil, ErrClosedDataSegment
 	}
@@ -56,7 +55,7 @@ func (ds *dataSegment) addLogEntry(logEntry *core.LogEntry) (*core.LogEntryIndex
 	ds.offset += int64(bytesWrittenSize)
 	ds.entriesCount++
 
-	return &core.LogEntryIndex{
+	return &LogEntryIndex{
 		Key:             logEntry.Key,
 		EntrySize:       bytesWrittenSize,
 		SegmentFilename: ds.fileName,
@@ -65,11 +64,11 @@ func (ds *dataSegment) addLogEntry(logEntry *core.LogEntry) (*core.LogEntryIndex
 }
 
 // getLogEntry retrives the log entry from the data segment
-func (ds *dataSegment) getLogEntry(logEntryIndex *core.LogEntryIndex) (*core.LogEntry, error) {
+func (ds *dataSegment) getLogEntry(logEntryIndex *LogEntryIndex) (*LogEntry, error) {
 	ds.mu.RLock()
 	defer ds.mu.RUnlock()
 
-	logEntry := &core.LogEntry{}
+	logEntry := &LogEntry{}
 	logEntryBytes := make([]byte, logEntryIndex.EntrySize)
 	_, err := ds.file.ReadAt(logEntryBytes, logEntryIndex.OffSet)
 

@@ -1,6 +1,7 @@
-package core_test 
+package core_test
 
 import (
+	"kv/core"
 	"math/rand"
 	"sync"
 	"testing"
@@ -16,7 +17,7 @@ func randomString(n int) string {
 	return string(s)
 }
 
-func benchmarkSet(valueSize int, engine *Engine, b *testing.B) {
+func benchmarkSet(valueSize int, engine *core.Engine, b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		key := randomString(rand.Intn(30))
 		value := randomString(valueSize)
@@ -27,22 +28,23 @@ func benchmarkSet(valueSize int, engine *Engine, b *testing.B) {
 	}
 }
 
-func benchmarkGet(valueSize int, engine *Engine, b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		value := randomString(valueSize)
-		key := randomString(rand.Intn(30))
-		if err := engine.Set(key, value); err != nil {
-			b.Fatal(err)
-		}
+func benchmarkGet(valueSize int, engine *core.Engine, b *testing.B) {
+	key := randomString(rand.Intn(30))
+	value := randomString(valueSize)
 
+	if err := engine.Set(key, value); err != nil {
+		b.Fatal(err)
+	}
+
+	for i := 0; i < b.N; i++ {
 		if _, err := engine.Get(key); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func makeEngine(t testing.TB) (*Engine, error) {
-	return NewEngine(&EngineConfig{
+func makeEngine(t testing.TB) (*core.Engine, error) {
+	return core.NewEngine(&core.EngineConfig{
 		SegmentMaxSize:             100,
 		SnapshotInterval:           4 * time.Second,
 		TolerableSnapshotFailCount: 5,
