@@ -98,13 +98,15 @@ func (ds *dataSegment) close() error {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
 
-	ds.logger.Debug("closing data segment")
+	if ds.isClosed == false {
+		ds.logger.Debug("closing data segment")
 
-	if err := ds.file.Close(); err != nil {
-		return err
+		if err := ds.file.Close(); err != nil {
+			return err
+		}
+
+		ds.isClosed = true
 	}
-
-	ds.isClosed = true
 
 	return nil
 }
@@ -154,7 +156,7 @@ func loadDataSegment(id string) (*dataSegment, error) {
 		file:         file,
 		fileName:     fileName,
 		id:           id,
-		isClosed:     true,
+		isClosed:     false,
 		offset:       -1,
 		mu:           new(sync.RWMutex),
 		logger: log.WithFields(log.Fields{

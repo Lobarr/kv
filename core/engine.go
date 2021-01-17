@@ -40,8 +40,9 @@ type Engine struct {
 	isCompactingSegments       bool                          // flag that ensures only one segments compaction process is running at a time
 	isCompactingSnapshots      bool                          // flag that ensures only one snapshots compaction process is running at a time
 
-	logger log.FieldLogger
-	ctx    context.Context
+	logger        log.FieldLogger
+	ctx           context.Context
+	ctxCancelFunc context.CancelFunc
 }
 
 // Store instance of a storage engine
@@ -189,11 +190,16 @@ func (engine *Engine) findLogEntryByKey(key string) (*LogEntry, error) {
 
 	for cursor >= 0 {
 		segmentID := engine.segments[cursor]
-		logEntryIndexesByKey, _ := engine.logEntryIndexesBySegmentID[segmentID]
-		logEntryIndex, ok := logEntryIndexesByKey[key]
+		logEntryIndexesByKey, logEntryIndexExists := engine.logEntryIndexesBySegmentID[segmentID]
 		cursor--
+    
+    if !logEntryIndexExists {
+      continue
+    }
 
-		if !ok {
+		logEntryIndex, logEntryExist := logEntryIndexesByKey[key]
+
+		if !logEntryExist{
 			continue
 		}
 
@@ -264,16 +270,16 @@ func (engine *Engine) Delete(key string) error {
 // Close closes the storage engine
 func (engine *Engine) Close() error {
 	engine.logger.Debug("closing database")
-	engine.ctx.Done()
+	engine.ctxCancelFunc()
+
+  if err := engine.snapshot(); err != nil {
+		return err
+	}
 
 	if err := engine.segment.close(); err != nil {
 		return err
 	}
-
-	if err := engine.snapshot(); err != nil {
-		return err
-	}
-
+	
 	return nil
 }
 
@@ -436,7 +442,7 @@ func (engine *Engine) compactSegments() error {
 
 	// send compaction jobs to workers through shared channel
 	for _, file := range files {
-		if !strings.Contains(file.Name(), ".segment") {
+		if !strings.Contains(file.Name(), ".segment") || engine.segment.fileName == file.Name() {
 			continue
 		}
 
@@ -499,6 +505,8 @@ func (engine *Engine) compactSegments() error {
 
 	// clean up segment references from memory
 	for _, segmentCtx := range segmentsToDelete {
+    //TODO: remove deleted segment from segments list (engine.segments)
+    engine.lruSegments.Remove(segmentCtx.id)
 		delete(engine.logEntryIndexesBySegmentID, segmentCtx.id)
 		os.Remove(path.Join(getSegmentsPath(), segmentCtx.fileName))
 	}
@@ -547,7 +555,7 @@ func (engine *Engine) startCompactors(ctx context.Context) error {
 
 			case <-ticker.C:
 				engine.mu.Lock()
-				if engine.isCompactingSegments == false {
+				if engine.isCompactingSegments == false && engine.lruSegments.Len() > 1 {
 					engine.isCompactingSegments = true
 
 					if err := engine.compactSegments(); err != nil {
@@ -653,6 +661,7 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 		return nil, err
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	engine := &Engine{
 		logEntryIndexesBySegmentID: make(map[string]logEntryIndexByKey),
 		segmentMaxSize:             config.SegmentMaxSize,
@@ -660,13 +669,14 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 		segment:                    segment,
 		lruSegments:                lruCache,
 		segments:                   []string{segment.id},
-		ctx:                        context.Background(),
+		ctx:                        ctx,
 		compactorInterval:          config.CompactorInterval,
 		compactorWorkerCount:       config.CompactorWorkerCount,
 		snapshotTTLDuration:        config.SnapshotTTLDuration,
 		isCompactingSegments:       false,
 		isCompactingSnapshots:      false,
-		logger:                     log.NewEntry(log.New()),
+		logger:                     log.WithField("storage_engine", "hash_index"),
+		ctxCancelFunc:              cancel,
 	}
 
 	engine.logger.Info("attempting to recover database")
