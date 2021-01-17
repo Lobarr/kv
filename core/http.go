@@ -116,8 +116,8 @@ func (kv *KvHttpServer) StartServer() error {
 	}
 
 	kv.store = engine
+	kv.setupMiddlewares() 
 	kv.setupEndpoints()
-	kv.setupMiddlewares()
 	//kv.setupInterruptHandler()
 	port := 8080
 
