@@ -192,14 +192,14 @@ func (engine *Engine) findLogEntryByKey(key string) (*LogEntry, error) {
 		segmentID := engine.segments[cursor]
 		logEntryIndexesByKey, logEntryIndexExists := engine.logEntryIndexesBySegmentID[segmentID]
 		cursor--
-    
-    if !logEntryIndexExists {
-      continue
-    }
+
+		if !logEntryIndexExists {
+			continue
+		}
 
 		logEntryIndex, logEntryExist := logEntryIndexesByKey[key]
 
-		if !logEntryExist{
+		if !logEntryExist {
 			continue
 		}
 
@@ -272,14 +272,14 @@ func (engine *Engine) Close() error {
 	engine.logger.Debug("closing database")
 	engine.ctxCancelFunc()
 
-  if err := engine.snapshot(); err != nil {
+	if err := engine.snapshot(); err != nil {
 		return err
 	}
 
 	if err := engine.segment.close(); err != nil {
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -505,8 +505,8 @@ func (engine *Engine) compactSegments() error {
 
 	// clean up segment references from memory
 	for _, segmentCtx := range segmentsToDelete {
-    //TODO: remove deleted segment from segments list (engine.segments)
-    engine.lruSegments.Remove(segmentCtx.id)
+		//TODO: remove deleted segment from segments list (engine.segments)
+		engine.lruSegments.Remove(segmentCtx.id)
 		delete(engine.logEntryIndexesBySegmentID, segmentCtx.id)
 		os.Remove(path.Join(getSegmentsPath(), segmentCtx.fileName))
 	}

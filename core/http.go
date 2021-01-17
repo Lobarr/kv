@@ -84,7 +84,7 @@ func (kv *KvHttpServer) setupInterruptHandler() {
 		if err := kv.store.Close(); err != nil {
 			logrus.Fatal(err)
 		}
-    os.Exit(0)
+		os.Exit(0)
 	}()
 }
 

@@ -18,6 +18,8 @@ func randomString(n int) string {
 }
 
 func benchmarkSet(valueSize int, engine *core.Engine, b *testing.B) {
+	b.ReportAllocs()
+
 	for i := 0; i < b.N; i++ {
 		key := randomString(rand.Intn(30))
 		value := randomString(valueSize)
@@ -29,6 +31,8 @@ func benchmarkSet(valueSize int, engine *core.Engine, b *testing.B) {
 }
 
 func benchmarkGet(valueSize int, engine *core.Engine, b *testing.B) {
+	b.ReportAllocs()
+
 	key := randomString(rand.Intn(30))
 	value := randomString(valueSize)
 
