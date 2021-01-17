@@ -83,7 +83,7 @@ func (kv *KvHttpServer) setupInterruptHandler() {
 		<-signalChan
 		logrus.Info("Received an interrupt, cleaning up...")
 		kv.store.Close()
-    return
+		return
 	}()
 }
 
@@ -108,7 +108,7 @@ func (kv *KvHttpServer) StartServer() error {
 		return err
 	}
 
-  fmt.Println(kv.engineConfig)
+	fmt.Println(kv.engineConfig)
 
 	engine, err := NewEngine(kv.engineConfig)
 	if err != nil {
@@ -117,8 +117,8 @@ func (kv *KvHttpServer) StartServer() error {
 
 	kv.store = engine
 	kv.setupEndpoints()
-  kv.setupMiddlewares()
-  //kv.setupInterruptHandler()
+	kv.setupMiddlewares()
+	//kv.setupInterruptHandler()
 	port := 8080
 
 	defer kv.store.Close()
