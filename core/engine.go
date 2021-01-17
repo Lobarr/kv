@@ -44,6 +44,14 @@ type Engine struct {
 	ctx    context.Context
 }
 
+// Store instance of a storage engine
+type Store interface {
+	Get(string) (string, error)
+	Set(string, string) error
+	Delete(string) error
+	Close() error
+}
+
 // EngineConfig configuration properties utilized when initializing an engine
 type EngineConfig struct {
 	SegmentMaxSize             int           // max size of entries stored in a data segment
@@ -256,6 +264,7 @@ func (engine *Engine) Delete(key string) error {
 // Close closes the storage engine
 func (engine *Engine) Close() error {
 	engine.logger.Debug("closing database")
+	engine.ctx.Done()
 
 	if err := engine.segment.close(); err != nil {
 		return err
@@ -264,8 +273,6 @@ func (engine *Engine) Close() error {
 	if err := engine.snapshot(); err != nil {
 		return err
 	}
-
-	engine.ctx.Done()
 
 	return nil
 }
