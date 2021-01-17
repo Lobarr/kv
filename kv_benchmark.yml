@@ -1,0 +1,42 @@
+base: 'http://localhost:8080'
+concurrency: 4
+iterations: 5000 
+rampup: 2
+plan:
+  - name: include benchmark data
+    include: kv_benchmark_data.yml
+
+  - name: set endpoint 
+    request:
+      url: "/keys/{{ item }}"
+      method: POST
+      body: "{{ payload }}"
+    with_items:
+      # random 100 character strings
+      - q9msRYlT05QeMOG0gDNtCdSSgea8KTEW8sXubxR213NK2tUr8fP6UaxMM2cefJT0RpDd61yHJEHO8jtqYwfeLAZyOxFHANo4mv6r
+      - RH83vmggmatqDkph4JG7uneXAoJ0sMy5PTT9awOneNP7ZbjrybEpCJDcRp3W17KjKUpaD0WEX7DAAHtjSAj1G5w9oJ44MqOWax1N
+      - WtWgL16U0SRjgUUyM74xxZlCtGgmYNg2yR4WXtPQLG7M2uLzdy4FSQUzrJGaRUzh6vk03PEYaYZyMvkp72MfA1FYx8aSeXCftDXz
+      - 2v8J797wVIBc0hb1yniYnvi4VynG7TxVqCVB883NahOd65FJKhvkbdoJx9hd6Wn4d81Yi5QfL6T1usbe8cSTnI4HBxvWZrhdsf0D
+
+  - name: get endpoint 
+    request:
+      url: "/keys/{{ item }}"
+    with_items:
+      # random 100 character strings
+      - q9msRYlT05QeMOG0gDNtCdSSgea8KTEW8sXubxR213NK2tUr8fP6UaxMM2cefJT0RpDd61yHJEHO8jtqYwfeLAZyOxFHANo4mv6r
+      - RH83vmggmatqDkph4JG7uneXAoJ0sMy5PTT9awOneNP7ZbjrybEpCJDcRp3W17KjKUpaD0WEX7DAAHtjSAj1G5w9oJ44MqOWax1N
+      - WtWgL16U0SRjgUUyM74xxZlCtGgmYNg2yR4WXtPQLG7M2uLzdy4FSQUzrJGaRUzh6vk03PEYaYZyMvkp72MfA1FYx8aSeXCftDXz
+      - 2v8J797wVIBc0hb1yniYnvi4VynG7TxVqCVB883NahOd65FJKhvkbdoJx9hd6Wn4d81Yi5QfL6T1usbe8cSTnI4HBxvWZrhdsf0D
+
+  #- name: delete endpoint 
+    #request:
+      #url: "/keys/{{ item }}"
+      #method: DELETE
+    #with_items:
+      ## random 100 character strings
+      #- q9msRYlT05QeMOG0gDNtCdSSgea8KTEW8sXubxR213NK2tUr8fP6UaxMM2cefJT0RpDd61yHJEHO8jtqYwfeLAZyOxFHANo4mv6r
+      #- RH83vmggmatqDkph4JG7uneXAoJ0sMy5PTT9awOneNP7ZbjrybEpCJDcRp3W17KjKUpaD0WEX7DAAHtjSAj1G5w9oJ44MqOWax1N
+      #- WtWgL16U0SRjgUUyM74xxZlCtGgmYNg2yR4WXtPQLG7M2uLzdy4FSQUzrJGaRUzh6vk03PEYaYZyMvkp72MfA1FYx8aSeXCftDXz
+      #- 2v8J797wVIBc0hb1yniYnvi4VynG7TxVqCVB883NahOd65FJKhvkbdoJx9hd6Wn4d81Yi5QfL6T1usbe8cSTnI4HBxvWZrhdsf0D
+
+
