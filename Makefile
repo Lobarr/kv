@@ -6,8 +6,8 @@ lint:
 
 test:
 	rm -rf ./core/tmp/
-	go test ./...
-	go test ./... -bench=.
+	go test ./... -race
+	go test ./... -race -bench=.
 
 benchmark:
 	drill -b kv_benchmark.yml --stats
@@ -16,4 +16,4 @@ start-http-server:
 	ENV=dev go run main.go
 
 build:
-	go build -race -o ./bin/kv_http_server
+	go build -o ./bin/kv_http_server
