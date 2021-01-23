@@ -9,15 +9,15 @@ import (
 )
 
 func init() {
-  env, ok := os.LookupEnv("ENV") 
+	env, ok := os.LookupEnv("ENV")
 
-  if ok && (env == "development" || env == "dev") {
-    logrus.SetLevel(logrus.DebugLevel)
-  } else {
-    logrus.SetLevel(logrus.InfoLevel)
-  }
+	if ok && (env == "development" || env == "dev") {
+		logrus.SetLevel(logrus.DebugLevel)
+	} else {
+		logrus.SetLevel(logrus.InfoLevel)
+	}
 
- 	logrus.SetOutput(os.Stdout)
+	logrus.SetOutput(os.Stdout)
 }
 
 func main() {

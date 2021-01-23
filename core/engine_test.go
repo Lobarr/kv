@@ -110,7 +110,7 @@ func TestConcurrentWrites(t *testing.T) {
 	wg := new(sync.WaitGroup)
 	for i := 0; i < 50; i++ {
 		go func(wg *sync.WaitGroup, id int) {
-			for i := 0; i < 100; i++ {
+			for i := 0; i < 500; i++ {
 				if err := engine.Set("key", "some-value"); err != nil {
 					panic(err)
 				}
@@ -119,6 +119,34 @@ func TestConcurrentWrites(t *testing.T) {
 				}
 				if err := engine.Set("json", "{'ping': 'pong'}"); err != nil {
 					panic(err)
+				}
+			}
+			wg.Done()
+		}(wg, i)
+		wg.Add(1)
+	}
+
+	wg.Wait()
+}
+
+func TestConcurrentReads(t *testing.T) {
+	engine, err := makeEngine(t)
+	defer engine.Close()
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := engine.Set("key", "{'ping': 'pong'}"); err != nil {
+		t.Fatal(err)
+	}
+
+	wg := new(sync.WaitGroup)
+	for i := 0; i < 50; i++ {
+		go func(wg *sync.WaitGroup, id int) {
+			for i := 0; i < 1000; i++ {
+				if _, err := engine.Get("key"); err != nil {
+					t.Fatal(err)
 				}
 			}
 			wg.Done()
