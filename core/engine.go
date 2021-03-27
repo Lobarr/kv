@@ -181,7 +181,7 @@ func (engine *Engine) loadSegment(segmentID string) (*dataSegment, error) {
 }
 
 // findLogEntryByKey locates the log entry of provided key by locating
-// the latest data segment containing that kejjy
+// the latest data segment containing that key
 func (engine *Engine) findLogEntryByKey(key string) (*LogEntry, error) {
 	engine.logger.Debugf("searching log entry for key %s", key)
 
