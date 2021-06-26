@@ -76,6 +76,7 @@ func (segmentMetadataList *SegmentMetadataList) Remove(segmentID string) error {
 	}
 
 	heap.Remove(segmentMetadataList._segmentMetadataHeap, index)
+	delete(segmentMetadataList.segmentIDByIndex, segmentID)
 	return nil
 }
 
