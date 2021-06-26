@@ -43,13 +43,17 @@ func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 	defer ds.mu.Unlock()
 
 	logEntryBytes, err := logEntry.Encode()
+	if err != nil {
+		return nil, err
+	}
 
+	compressedLogEntryBytes, err := compressBytes(logEntryBytes)
 	if err != nil {
 		return nil, err
 	}
 
 	startOffset := ds.offset
-	logEntryBytesWithSeperator := bytes.Join([][]byte{logEntryBytes, make([]byte, 0)}, LogEntrySeperator)
+	logEntryBytesWithSeperator := bytes.Join([][]byte{compressedLogEntryBytes, make([]byte, 0)}, LogEntrySeperator)
 	bytesWrittenSize, err := ds.file.WriteAt(logEntryBytesWithSeperator, startOffset)
 
 	if err != nil {
@@ -62,10 +66,11 @@ func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 	ds.logger.Debugf("new data segment state : offset = %d entriesCount = %d", ds.offset, ds.entriesCount)
 
 	return &LogEntryIndex{
-		Key:             logEntry.Key,
-		EntrySize:       bytesWrittenSize,
-		SegmentFilename: ds.fileName,
-		OffSet:          startOffset,
+		Key:                 logEntry.Key,
+		EntrySize:           len(logEntryBytes),
+		CompressedEntrySize: len(compressedLogEntryBytes),
+		SegmentFilename:     ds.fileName,
+		OffSet:              startOffset,
 	}, nil
 }
 
@@ -76,14 +81,18 @@ func (ds *dataSegment) getLogEntry(logEntryIndex *LogEntryIndex) (*LogEntry, err
 
 	ds.logger.Debugf("retrieving log entry for key %s", logEntryIndex.Key)
 
-	logEntry := &LogEntry{}
-	logEntryBytes := make([]byte, logEntryIndex.EntrySize)
-	_, err := ds.file.ReadAt(logEntryBytes, logEntryIndex.OffSet)
-
+	compressedLogEntryBytes := make([]byte, logEntryIndex.CompressedEntrySize)
+	_, err := ds.file.ReadAt(compressedLogEntryBytes, logEntryIndex.OffSet)
 	if err != nil {
 		return nil, err
 	}
 
+	logEntryBytes, err := uncompressBytes(compressedLogEntryBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	logEntry := &LogEntry{}
 	err = logEntry.Decode(logEntryBytes)
 
 	if err != nil {

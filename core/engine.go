@@ -286,6 +286,8 @@ func (engine *Engine) Close() error {
 	return nil
 }
 
+// func (engine *Engine) compressSnapshot
+
 // snapshot writes a snapshot of log entry indexes by segment id to disk
 func (engine *Engine) snapshot() error {
 	engine.logger.Debug("snapshotting database state")
@@ -305,7 +307,12 @@ func (engine *Engine) snapshot() error {
 		return err
 	}
 
-	if _, err := file.Write(snapshotEntryBytes); err != nil {
+	compressedSnapshotEntryBytes, err := compressBytes(snapshotEntryBytes)
+	if err != nil {
+		return err
+	}
+
+	if _, err := file.Write(compressedSnapshotEntryBytes); err != nil {
 		return err
 	}
 
@@ -320,7 +327,12 @@ func (engine *Engine) snapshot() error {
 func (engine *Engine) loadSnapshot(fileName string) error {
 	engine.logger.Debugf("loading snapshot %s", fileName)
 
-	snapshotBytes, err := ioutil.ReadFile(fileName)
+	compressedSnapshotEntryBytes, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		return err
+	}
+
+	snapshotBytes, err := uncompressBytes(compressedSnapshotEntryBytes)
 	if err != nil {
 		return err
 	}

@@ -66,7 +66,7 @@ func makeEngine(t testing.TB) (*core.Engine, error) {
 		SnapshotInterval:           5 * time.Second,
 		TolerableSnapshotFailCount: 5,
 		CacheSize:                  10,
-		CompactorInterval:          15 * time.Second,
+		CompactorInterval:          10 * time.Second,
 		CompactorWorkerCount:       10,
 		SnapshotTTLDuration:        10 * time.Second,
 	})
@@ -130,7 +130,7 @@ func BenchmarkGet(b *testing.B) {
 	})
 }
 
-const WorkersCount = 2
+const WorkersCount = 10
 
 func TestConcurrentWrites(t *testing.T) {
 	engine, err := makeEngine(t)
