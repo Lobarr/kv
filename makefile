@@ -6,8 +6,8 @@ lint:
 
 test:
 	rm -rf ./core/tmp/
-	go test ./... -race -cover
-	go test ./... -race -bench=.
+	go test ./... -race -cover -timeout 30m
+	go test ./... -race -bench=. -timeout 30m
 
 benchmark:
 	drill -b kv_benchmark.yml --stats

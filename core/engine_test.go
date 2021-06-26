@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"kv/core"
+	"log"
 	"math/rand"
 	"os"
 	"sync"
@@ -12,7 +13,7 @@ import (
 )
 
 func init() {
-	logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetLevel(logrus.InfoLevel)
 	logrus.SetOutput(os.Stdout)
 }
 
@@ -61,12 +62,12 @@ func benchmarkGet(valueSize int, engine *core.Engine, b *testing.B) {
 
 func makeEngine(t testing.TB) (*core.Engine, error) {
 	return core.NewEngine(&core.EngineConfig{
-		SegmentMaxSize:             10000,
+		SegmentMaxSize:             5000,
 		SnapshotInterval:           5 * time.Second,
 		TolerableSnapshotFailCount: 5,
-		CacheSize:                  5,
+		CacheSize:                  10,
 		CompactorInterval:          5 * time.Second,
-		CompactorWorkerCount:       5,
+		CompactorWorkerCount:       10,
 		SnapshotTTLDuration:        10 * time.Second,
 	})
 }
@@ -129,6 +130,8 @@ func BenchmarkGet(b *testing.B) {
 	})
 }
 
+const WorkersCount = 20
+
 func TestConcurrentWrites(t *testing.T) {
 	engine, err := makeEngine(t)
 
@@ -139,9 +142,10 @@ func TestConcurrentWrites(t *testing.T) {
 	defer engine.Close()
 
 	wg := new(sync.WaitGroup)
-	for i := 0; i < 50; i++ {
+	for z := 0; z < WorkersCount; z++ {
 		go func(wg *sync.WaitGroup, id int) {
 			for i := 0; i < 10000; i++ {
+				log.Printf("worker %v - job %v", id, i)
 				if err := engine.Set(randomKey(200, 400), randomString(500)); err != nil {
 					panic(err)
 				}
@@ -153,7 +157,7 @@ func TestConcurrentWrites(t *testing.T) {
 				}
 			}
 			wg.Done()
-		}(wg, i)
+		}(wg, z)
 		wg.Add(1)
 	}
 
@@ -175,15 +179,16 @@ func TestConcurrentReads(t *testing.T) {
 	}
 
 	wg := new(sync.WaitGroup)
-	for i := 0; i < 50; i++ {
+	for z := 0; z < WorkersCount; z++ {
 		go func(wg *sync.WaitGroup, id int) {
 			for i := 0; i < 10000; i++ {
+				log.Printf("worker %v - job %v", id, i)
 				if _, err := engine.Get(expectedKey); err != nil {
 					panic(err)
 				}
 			}
 			wg.Done()
-		}(wg, i)
+		}(wg, z)
 		wg.Add(1)
 	}
 
