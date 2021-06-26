@@ -3,10 +3,18 @@ package core_test
 import (
 	"kv/core"
 	"math/rand"
+	"os"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
+
+func init() {
+	logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetOutput(os.Stdout)
+}
 
 func randomString(n int) string {
 	letters := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
@@ -17,11 +25,15 @@ func randomString(n int) string {
 	return string(s)
 }
 
+func randomKey(minSize int, maxSize int) string {
+	return randomString(rand.Intn(maxSize-minSize) + minSize)
+}
+
 func benchmarkSet(valueSize int, engine *core.Engine, b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		key := randomString(rand.Intn(30))
+		key := randomKey(100, 200)
 		value := randomString(valueSize)
 
 		if err := engine.Set(key, value); err != nil {
@@ -33,7 +45,7 @@ func benchmarkSet(valueSize int, engine *core.Engine, b *testing.B) {
 func benchmarkGet(valueSize int, engine *core.Engine, b *testing.B) {
 	b.ReportAllocs()
 
-	key := randomString(rand.Intn(30))
+	key := randomKey(100, 200)
 	value := randomString(valueSize)
 
 	if err := engine.Set(key, value); err != nil {
@@ -49,12 +61,12 @@ func benchmarkGet(valueSize int, engine *core.Engine, b *testing.B) {
 
 func makeEngine(t testing.TB) (*core.Engine, error) {
 	return core.NewEngine(&core.EngineConfig{
-		SegmentMaxSize:             1000,
+		SegmentMaxSize:             10000,
 		SnapshotInterval:           5 * time.Second,
 		TolerableSnapshotFailCount: 5,
 		CacheSize:                  5,
-		CompactorInterval:          3 * time.Second,
-		CompactorWorkerCount:       3,
+		CompactorInterval:          5 * time.Second,
+		CompactorWorkerCount:       5,
 		SnapshotTTLDuration:        10 * time.Second,
 	})
 }
@@ -77,6 +89,15 @@ func BenchmarkSet(b *testing.B) {
 	b.Run("1000", func(b *testing.B) {
 		benchmarkSet(1000, engine, b)
 	})
+	b.Run("10000", func(b *testing.B) {
+		benchmarkSet(10000, engine, b)
+	})
+	b.Run("100000", func(b *testing.B) {
+		benchmarkSet(100000, engine, b)
+	})
+	b.Run("1000000", func(b *testing.B) {
+		benchmarkSet(1000000, engine, b)
+	})
 }
 
 func BenchmarkGet(b *testing.B) {
@@ -97,27 +118,37 @@ func BenchmarkGet(b *testing.B) {
 	b.Run("1000", func(b *testing.B) {
 		benchmarkGet(1000, engine, b)
 	})
+	b.Run("10000", func(b *testing.B) {
+		benchmarkGet(10000, engine, b)
+	})
+	b.Run("100000", func(b *testing.B) {
+		benchmarkGet(100000, engine, b)
+	})
+	b.Run("1000000", func(b *testing.B) {
+		benchmarkGet(1000000, engine, b)
+	})
 }
 
 func TestConcurrentWrites(t *testing.T) {
 	engine, err := makeEngine(t)
-	defer engine.Close()
 
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	defer engine.Close()
+
 	wg := new(sync.WaitGroup)
 	for i := 0; i < 50; i++ {
 		go func(wg *sync.WaitGroup, id int) {
-			for i := 0; i < 500; i++ {
-				if err := engine.Set("key", "some-value"); err != nil {
+			for i := 0; i < 10000; i++ {
+				if err := engine.Set(randomKey(200, 400), randomString(500)); err != nil {
 					panic(err)
 				}
-				if err := engine.Set("some-key", "new-value"); err != nil {
+				if err := engine.Set(randomKey(400, 600), randomString(1000)); err != nil {
 					panic(err)
 				}
-				if err := engine.Set("json", "{'ping': 'pong'}"); err != nil {
+				if err := engine.Set(randomKey(600, 800), randomString(1500)); err != nil {
 					panic(err)
 				}
 			}
@@ -131,22 +162,24 @@ func TestConcurrentWrites(t *testing.T) {
 
 func TestConcurrentReads(t *testing.T) {
 	engine, err := makeEngine(t)
-	defer engine.Close()
 
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := engine.Set("key", "{'ping': 'pong'}"); err != nil {
+	defer engine.Close()
+
+	expectedKey := randomKey(200, 400)
+	if err := engine.Set(expectedKey, randomString(1000)); err != nil {
 		t.Fatal(err)
 	}
 
 	wg := new(sync.WaitGroup)
 	for i := 0; i < 50; i++ {
 		go func(wg *sync.WaitGroup, id int) {
-			for i := 0; i < 1000; i++ {
-				if _, err := engine.Get("key"); err != nil {
-					t.Fatal(err)
+			for i := 0; i < 10000; i++ {
+				if _, err := engine.Get(expectedKey); err != nil {
+					panic(err)
 				}
 			}
 			wg.Done()

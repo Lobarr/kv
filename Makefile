@@ -6,7 +6,7 @@ lint:
 
 test:
 	rm -rf ./core/tmp/
-	go test ./... -race
+	go test ./... -race -cover
 	go test ./... -race -bench=.
 
 benchmark:
