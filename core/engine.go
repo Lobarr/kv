@@ -29,7 +29,7 @@ type logEntryIndexByKey map[string]*LogEntryIndex
 // where data is located on disk
 type Engine struct {
 	logEntryIndexesBySegmentID map[string]logEntryIndexByKey // map that holds log entry indexes by segment id
-	segments                   []string                      // historical list of segments id's
+	segmentsMetadataList       *SegmentMetadataList          // historical list of segments id's
 	lruSegments                *lru.Cache                    // cache that holds the most recently used data segments
 	segment                    *dataSegment                  // current data segment
 	segmentMaxSize             int                           // max size of entries stored in a data segment
@@ -69,13 +69,15 @@ func (engine *Engine) captureSnapshots(ctx context.Context, interval time.Durati
 	engine.logger.Debugf("starting snapshots taker process with interval %v and tolerableFailCount %d", interval, tolerableFailCount)
 
 	failCounts := 0
+	ticker := time.NewTicker(interval)
+
 	for {
 		if failCounts >= tolerableFailCount {
 			panic("snapshotting failure")
 		}
 
 		select {
-		case <-time.Tick(interval):
+		case <-ticker.C:
 			engine.mu.RLock()
 			err := engine.snapshot()
 			if err != nil {
@@ -111,7 +113,7 @@ func (engine *Engine) checkDataSegment() error {
 		}
 
 		engine.segment = newDataSegment
-		engine.segments = append(engine.segments, newDataSegment.id)
+		engine.segmentsMetadataList.Add(newDataSegment.id)
 
 		engine.logger.Debugf("switched to new data segment with id %s", newDataSegment.id)
 	}
@@ -186,10 +188,11 @@ func (engine *Engine) findLogEntryByKey(key string) (*LogEntry, error) {
 	engine.logger.Debugf("searching log entry for key %s", key)
 
 	var segment *dataSegment
-	cursor := len(engine.segments) - 1
+	segments := engine.segmentsMetadataList.GetSegmentIDs()
+	cursor := len(segments) - 1
 
 	for cursor >= 0 {
-		segmentID := engine.segments[cursor]
+		segmentID := segments[cursor]
 		logEntryIndexesByKey, logEntryIndexExists := engine.logEntryIndexesBySegmentID[segmentID]
 		cursor--
 
@@ -335,7 +338,7 @@ func (engine *Engine) loadSnapshot(fileName string) error {
 	}
 
 	for segmentID := range engine.logEntryIndexesBySegmentID {
-		engine.segments = append(engine.segments, segmentID)
+		engine.segmentsMetadataList.Add(segmentID)
 	}
 
 	return nil
@@ -498,14 +501,18 @@ func (engine *Engine) compactSegments() error {
 		engine.addLogEntryIndex(logEntry.Key, logEntryIndex)
 	}
 
-	engine.segments = append(engine.segments, compactedSegment.id)
+	engine.segmentsMetadataList.Add(compactedSegment.id)
 	if err := compactedSegment.close(); err != nil {
 		return err
 	}
 
 	// clean up segment references from memory
 	for _, segmentCtx := range segmentsToDelete {
-		//TODO: remove deleted segment from segments list (engine.segments)
+		err = engine.segmentsMetadataList.Remove(segmentCtx.id)
+		if err != nil {
+			return err
+		}
+
 		engine.lruSegments.Remove(segmentCtx.id)
 		delete(engine.logEntryIndexesBySegmentID, segmentCtx.id)
 		os.Remove(path.Join(getSegmentsPath(), segmentCtx.fileName))
@@ -555,7 +562,7 @@ func (engine *Engine) startCompactors(ctx context.Context) error {
 
 			case <-ticker.C:
 				engine.mu.Lock()
-				if engine.isCompactingSegments == false && engine.lruSegments.Len() > 1 {
+				if !engine.isCompactingSegments && engine.lruSegments.Len() > 1 {
 					engine.isCompactingSegments = true
 
 					if err := engine.compactSegments(); err != nil {
@@ -578,7 +585,7 @@ func (engine *Engine) startCompactors(ctx context.Context) error {
 				return
 
 			case <-ticker.C:
-				if engine.isCompactingSnapshots == false {
+				if !engine.isCompactingSnapshots {
 					engine.isCompactingSnapshots = true
 
 					if err := engine.compactSnapshots(); err != nil {
@@ -651,6 +658,8 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 		}
 	}
 
+	segmentMetadataList := NewSegmentMetadataList()
+
 	segment, err := newDataSegment()
 	if err != nil {
 		return nil, err
@@ -661,6 +670,8 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 		return nil, err
 	}
 
+	segmentMetadataList.Add(segment.id)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	engine := &Engine{
 		logEntryIndexesBySegmentID: make(map[string]logEntryIndexByKey),
@@ -668,7 +679,7 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 		mu:                         new(sync.RWMutex),
 		segment:                    segment,
 		lruSegments:                lruCache,
-		segments:                   []string{segment.id},
+		segmentsMetadataList:       segmentMetadataList,
 		ctx:                        ctx,
 		compactorInterval:          config.CompactorInterval,
 		compactorWorkerCount:       config.CompactorWorkerCount,

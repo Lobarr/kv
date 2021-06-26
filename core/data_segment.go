@@ -98,7 +98,7 @@ func (ds *dataSegment) close() error {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
 
-	if ds.isClosed == false {
+	if !ds.isClosed {
 		ds.logger.Debug("closing data segment")
 
 		if err := ds.file.Close(); err != nil {

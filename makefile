@@ -4,10 +4,15 @@ lint-fix:
 lint: 
 	gofmt -d .
 
-test:
+test-race:
 	rm -rf ./core/tmp/
 	go test ./... -race -cover -timeout 30m
 	go test ./... -race -bench=. -timeout 30m
+
+test:
+	rm -rf ./core/tmp/
+	go test ./... -cover -timeout 30m
+	go test ./... -bench=. -timeout 30m
 
 benchmark:
 	drill -b kv_benchmark.yml --stats

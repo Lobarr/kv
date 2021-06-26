@@ -62,11 +62,11 @@ func benchmarkGet(valueSize int, engine *core.Engine, b *testing.B) {
 
 func makeEngine(t testing.TB) (*core.Engine, error) {
 	return core.NewEngine(&core.EngineConfig{
-		SegmentMaxSize:             5000,
+		SegmentMaxSize:             1000,
 		SnapshotInterval:           5 * time.Second,
 		TolerableSnapshotFailCount: 5,
 		CacheSize:                  10,
-		CompactorInterval:          5 * time.Second,
+		CompactorInterval:          15 * time.Second,
 		CompactorWorkerCount:       10,
 		SnapshotTTLDuration:        10 * time.Second,
 	})
@@ -130,7 +130,7 @@ func BenchmarkGet(b *testing.B) {
 	})
 }
 
-const WorkersCount = 20
+const WorkersCount = 2
 
 func TestConcurrentWrites(t *testing.T) {
 	engine, err := makeEngine(t)
