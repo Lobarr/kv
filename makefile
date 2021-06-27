@@ -5,11 +5,9 @@ lint:
 	gofmt -d .
 
 test-race:
-	go test ./core -race -v -timeout 1h
 	go test ./core -race -v -bench=. -timeout 1h
 
 test:
-	go test ./core -v -cover -timeout 1h
 	go test ./core -v -bench=. -timeout 1h
 
 benchmark:
