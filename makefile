@@ -6,13 +6,13 @@ lint:
 
 test-race:
 	rm -rf ./core/tmp/
-	go test ./... -race -cover -timeout 30m
-	go test ./... -race -bench=. -timeout 30m
+	go test ./... -race -v -timeout 1h
+	go test ./... -race -v -bench=. -timeout 1h
 
 test:
 	rm -rf ./core/tmp/
-	go test ./... -cover -timeout 30m
-	go test ./... -bench=. -timeout 30m
+	go test ./... -v -cover -timeout 1h
+	go test ./... -v -bench=. -timeout 1h
 
 benchmark:
 	drill -b kv_benchmark.yml --stats
