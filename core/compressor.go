@@ -56,7 +56,7 @@ func compressBytes(rawBytes []byte) ([]byte, error) {
 	CompressBytesDurationMilliseconds.WithLabelValues(
 		fmt.Sprint(len(rawBytes)),
 		fmt.Sprint(compressedBytes.Len()),
-	).Observe(float64(time.Since(start).Microseconds()))
+	).Observe(float64(time.Since(start).Milliseconds()))
 
 	return compressedBytes.Bytes(), nil
 }
@@ -90,7 +90,7 @@ func uncompressBytes(compressedBytes []byte) ([]byte, error) {
 		fmt.Sprint(len(rawBuffer.Bytes())),
 		fmt.Sprint(len(compressedBytes)),
 	).Observe(
-		float64(time.Since(start).Microseconds()),
+		float64(time.Since(start).Milliseconds()),
 	)
 
 	return rawBuffer.Bytes(), nil
