@@ -35,6 +35,22 @@ func init() {
 	prometheus.Register(core.EngineRolloverSegmentDurationMilliseconds)
 	prometheus.Register(core.EngineSetDurationNanoseconds)
 	prometheus.Register(core.EngineSetDurationMilliseconds)
+	prometheus.Register(core.EngineLoadDataSegmentDurationNanoseconds)
+	prometheus.Register(core.EngineLoadDataSegmentDurationMilliseconds)
+	prometheus.Register(core.EngineFindLogEntryByKeyDurationNanoseconds)
+	prometheus.Register(core.EngineFindLogEntryByKeyDurationMilliseconds)
+	prometheus.Register(core.EngineGetDurationNanoseconds)
+	prometheus.Register(core.EngineGetDurationMilliseconds)
+	prometheus.Register(core.EngineDeleteDurationNanoseconds)
+	prometheus.Register(core.EngineDeleteDurationMilliseconds)
+	prometheus.Register(core.EngineCloseDurationNanoseconds)
+	prometheus.Register(core.EngineCloseDurationMilliseconds)
+	prometheus.Register(core.EngineCompactSegmentsDurationNanoseconds)
+	prometheus.Register(core.EngineCompactSegmentsDurationMilliseconds)
+	prometheus.Register(core.EngineCompactSnapshotsDurationNanoseconds)
+	prometheus.Register(core.EngineCompactSnapshotsDurationMilliseconds)
+	prometheus.Register(core.EngineSegmentsCompactionCount)
+	prometheus.Register(core.EngineSnapshotsCompactionCount)
 }
 
 func main() {

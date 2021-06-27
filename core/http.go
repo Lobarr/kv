@@ -112,7 +112,6 @@ func (kv *KvHttpServer) loadConfigs() error {
 	}
 
 	err = config.Load(kv.config)
-
 	if err != nil {
 		return err
 	}
@@ -140,6 +139,9 @@ func (kv *KvHttpServer) StartServer() error {
 	if kv.config.ExposeMetrics {
 		go kv.startMetricsServer()
 	}
+
+	logrus.Infof("using kv http server config %#v", kv.config)
+	logrus.Infof("using engine config %#v", kv.config.EngineConfig)
 
 	logrus.Infof("starting kv http server on port %d", kv.config.Port)
 	return kv.server.Listen(fmt.Sprintf(":%d", kv.config.Port)) //TODO: make port configurable

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"io/ioutil"
 	"os"
 	"path"
@@ -80,6 +81,66 @@ var (
 		Name: "engine_find_log_entry_by_key_duration_milliseconds",
 		Help: "how long it took to find a log entry belonging to a key",
 	}, []string{"key", "found", "searched_segments_count"})
+
+	EngineGetDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_get_duration_nanoseconds",
+		Help: "how long it takes to get a key's value",
+	}, []string{"key", "found", "deleted"})
+
+	EngineGetDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_get_duration_milliseconds",
+		Help: "how long it takes to get a key's value",
+	}, []string{"key", "found", "deleted"})
+
+	EngineDeleteDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_delete_duration_nanoseconds",
+		Help: "how long it takes to delete a key's value",
+	}, []string{"key", "found"})
+
+	EngineDeleteDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_delete_duration_milliseconds",
+		Help: "how long it takes to delete a key's value",
+	}, []string{"key", "found"})
+
+	EngineCloseDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_close_duration_nanoseconds",
+		Help: "how long it takes to close the engine",
+	}, []string{"segment_id", "segment_entries_count", "historical_segment_ids_length"})
+
+	EngineCloseDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_close_duration_milliseconds",
+		Help: "how long it takes to close the engine",
+	}, []string{"segment_id", "segment_entries_count", "historical_segment_ids_length"})
+
+	EngineCompactSegmentsDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_compact_segments_duration_nanoseconds",
+		Help: "how long it takes to run a segment compaction job",
+	}, []string{"files_to_compact", "segments_to_delete", "workers_count", "segments_max_size"})
+
+	EngineCompactSegmentsDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_compact_segments_duration_nanoseconds",
+		Help: "how long it takes to run a segment compaction job",
+	}, []string{"files_to_compact", "segments_to_delete", "workers_count", "segments_max_size"})
+
+	EngineCompactSnapshotsDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_compact_segments_duration_nanoseconds",
+		Help: "how long it takes to run a snapshot compaction job",
+	}, []string{"files_to_compact", "deleted_count"})
+
+	EngineCompactSnapshotsDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_compact_segments_duration_nanoseconds",
+		Help: "how long it takes to run a snapshot compaction job",
+	}, []string{"files_to_compact", "deleted_count"})
+
+	EngineSegmentsCompactionCount = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "engine_segments_compaction_count",
+		Help: "how many times the segments compaction job has run",
+	})
+
+	EngineSnapshotsCompactionCount = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "engine_snapshots_compaction_count",
+		Help: "how many times the snapshots compaction job has run",
+	})
 )
 
 // ErrKeyNotFound occurs when a key is not found in the data store
@@ -162,6 +223,7 @@ func (engine *Engine) checkDataSegment() error {
 	if engine.segment.entriesCount >= engine.segmentMaxSize {
 		start := time.Now()
 		oldSegment := engine.segment
+
 		defer func() {
 			EngineRolloverSegmentDurationNanoseconds.WithLabelValues(
 				oldSegment.id,
@@ -262,6 +324,26 @@ func (engine *Engine) Set(key, value string) error {
 func (engine *Engine) loadSegment(segmentID string) (*dataSegment, error) {
 	start := time.Now()
 	var segment *dataSegment
+	var stat fs.FileInfo
+	var ok bool
+
+	defer func() {
+		EngineLoadDataSegmentDurationNanoseconds.WithLabelValues(
+			segmentID,
+			fmt.Sprint(stat.Size()),
+			strings.ToLower(strconv.FormatBool(ok)),
+		).Observe(
+			float64(time.Since(start).Nanoseconds()),
+		)
+		EngineLoadDataSegmentDurationMilliseconds.WithLabelValues(
+			segmentID,
+			fmt.Sprint(stat.Size()),
+			strings.ToLower(strconv.FormatBool(ok)),
+		).Observe(
+			float64(time.Since(start).Milliseconds()),
+		)
+	}()
+
 	cacheHit, ok := engine.lruSegments.Get(segmentID)
 
 	if !ok {
@@ -284,21 +366,6 @@ func (engine *Engine) loadSegment(segmentID string) (*dataSegment, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	EngineLoadDataSegmentDurationNanoseconds.WithLabelValues(
-		segmentID,
-		fmt.Sprint(stat.Size()),
-		strings.ToLower(strconv.FormatBool(ok)),
-	).Observe(
-		float64(time.Since(start).Nanoseconds()),
-	)
-	EngineLoadDataSegmentDurationMilliseconds.WithLabelValues(
-		segmentID,
-		fmt.Sprint(stat.Size()),
-		strings.ToLower(strconv.FormatBool(ok)),
-	).Observe(
-		float64(time.Since(start).Milliseconds()),
-	)
 
 	return segment, nil
 }
@@ -342,6 +409,7 @@ func (engine *Engine) findLogEntryByKey(key string) (*LogEntry, error) {
 	for cursor >= 0 {
 		segmentID := segments[cursor]
 		logEntryIndexesByKey, logEntryIndexExists := engine.logEntryIndexesBySegmentID[segmentID]
+
 		cursor--
 
 		if !logEntryIndexExists {
@@ -375,10 +443,40 @@ func (engine *Engine) findLogEntryByKey(key string) (*LogEntry, error) {
 func (engine *Engine) Get(key string) (string, error) {
 	engine.logger.Debugf("getting key %s", key)
 
+	start := time.Now()
+	var logEntry *LogEntry
+	var err error
+
+	defer func() {
+		EngineGetDurationNanoseconds.WithLabelValues(
+			key,
+			strings.ToLower(
+				strconv.FormatBool(logEntry != nil),
+			),
+			strings.ToLower(
+				strconv.FormatBool(logEntry != nil && logEntry.IsDeleted),
+			),
+		).Observe(
+			float64(time.Since(start).Nanoseconds()),
+		)
+
+		EngineGetDurationMilliseconds.WithLabelValues(
+			key,
+			strings.ToLower(
+				strconv.FormatBool(logEntry != nil),
+			),
+			strings.ToLower(
+				strconv.FormatBool(logEntry != nil && logEntry.IsDeleted),
+			),
+		).Observe(
+			float64(time.Since(start).Milliseconds()),
+		)
+	}()
+
 	engine.mu.RLock()
 	defer engine.mu.RUnlock()
 
-	logEntry, err := engine.findLogEntryByKey(key)
+	logEntry, err = engine.findLogEntryByKey(key)
 	if err != nil {
 		return "", err
 	}
@@ -394,12 +492,35 @@ func (engine *Engine) Get(key string) (string, error) {
 // segment
 func (engine *Engine) Delete(key string) error {
 	engine.logger.Debugf("deleting key %s", key)
+	var logEntry *LogEntry
+	var err error
+	start := time.Now()
+
+	defer func() {
+		EngineDeleteDurationNanoseconds.WithLabelValues(
+			key,
+			strings.ToLower(
+				strconv.FormatBool(err == ErrKeyNotFound),
+			),
+		).Observe(
+			float64(time.Since(start).Nanoseconds()),
+		)
+
+		EngineDeleteDurationMilliseconds.WithLabelValues(
+			key,
+			strings.ToLower(
+				strconv.FormatBool(err == ErrKeyNotFound),
+			),
+		).Observe(
+			float64(time.Since(start).Milliseconds()),
+		)
+	}()
 
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
 
 	engine.checkDataSegment()
-	logEntry, err := engine.findLogEntryByKey(key)
+	logEntry, err = engine.findLogEntryByKey(key)
 
 	if err != nil {
 		return err
@@ -420,6 +541,25 @@ func (engine *Engine) Delete(key string) error {
 
 // Close closes the storage engine
 func (engine *Engine) Close() error {
+	start := time.Now()
+	defer func() {
+		EngineCloseDurationNanoseconds.WithLabelValues(
+			engine.segment.id,
+			fmt.Sprint(engine.segment.entriesCount),
+			fmt.Sprint(len(engine.segmentsMetadataList.GetSegmentIDs())),
+		).Observe(
+			float64(time.Since(start).Nanoseconds()),
+		)
+
+		EngineCloseDurationMilliseconds.WithLabelValues(
+			engine.segment.id,
+			fmt.Sprint(engine.segment.entriesCount),
+			fmt.Sprint(len(engine.segmentsMetadataList.GetSegmentIDs())),
+		).Observe(
+			float64(time.Since(start).Milliseconds()),
+		)
+	}()
+
 	engine.logger.Debug("closing database")
 	engine.ctxCancelFunc()
 
@@ -440,6 +580,25 @@ func (engine *Engine) Close() error {
 func (engine *Engine) snapshot() error {
 	engine.logger.Debug("snapshotting database state")
 	start := time.Now()
+	var snapshotEntryBytes []byte
+	var compressedSnapshotEntryBytes []byte
+
+	defer func() {
+		EngineCaptureSnapshotDurationNanoseconds.WithLabelValues(
+			fmt.Sprint(len(engine.logEntryIndexesBySegmentID)),
+			fmt.Sprint(len(snapshotEntryBytes)),
+			fmt.Sprint(len(compressedSnapshotEntryBytes)),
+		).Observe(
+			float64(time.Since(start).Nanoseconds()),
+		)
+		EngineCaptureSnapshotDurationMilliseconds.WithLabelValues(
+			fmt.Sprint(len(engine.logEntryIndexesBySegmentID)),
+			fmt.Sprint(len(snapshotEntryBytes)),
+			fmt.Sprint(len(compressedSnapshotEntryBytes)),
+		).Observe(
+			float64(time.Since(start).Milliseconds()),
+		)
+	}()
 
 	snapshotEntry, err := newSnapshotEntry(engine.logEntryIndexesBySegmentID)
 	if err != nil {
@@ -451,12 +610,12 @@ func (engine *Engine) snapshot() error {
 		return err
 	}
 
-	snapshotEntryBytes, err := snapshotEntry.Encode()
+	snapshotEntryBytes, err = snapshotEntry.Encode()
 	if err != nil {
 		return err
 	}
 
-	compressedSnapshotEntryBytes, err := compressBytes(snapshotEntryBytes)
+	compressedSnapshotEntryBytes, err = compressBytes(snapshotEntryBytes)
 	if err != nil {
 		return err
 	}
@@ -469,21 +628,6 @@ func (engine *Engine) snapshot() error {
 		return err
 	}
 
-	EngineCaptureSnapshotDurationNanoseconds.WithLabelValues(
-		fmt.Sprint(len(engine.logEntryIndexesBySegmentID)),
-		fmt.Sprint(len(snapshotEntryBytes)),
-		fmt.Sprint(len(compressedSnapshotEntryBytes)),
-	).Observe(
-		float64(time.Since(start).Nanoseconds()),
-	)
-	EngineCaptureSnapshotDurationMilliseconds.WithLabelValues(
-		fmt.Sprint(len(engine.logEntryIndexesBySegmentID)),
-		fmt.Sprint(len(snapshotEntryBytes)),
-		fmt.Sprint(len(compressedSnapshotEntryBytes)),
-	).Observe(
-		float64(time.Since(start).Milliseconds()),
-	)
-
 	return nil
 }
 
@@ -491,13 +635,32 @@ func (engine *Engine) snapshot() error {
 func (engine *Engine) loadSnapshot(fileName string) error {
 	engine.logger.Debugf("loading snapshot %s", fileName)
 	start := time.Now()
+	var snapshotBytes []byte
+	var compressedSnapshotEntryBytes []byte
+
+	defer func() {
+		EngineLoadSnapshotDurationNanoseconds.WithLabelValues(
+			fmt.Sprint(len(engine.logEntryIndexesBySegmentID)),
+			fmt.Sprint(len(snapshotBytes)),
+			fmt.Sprint(len(compressedSnapshotEntryBytes)),
+		).Observe(
+			float64(time.Since(start).Nanoseconds()),
+		)
+		EngineLoadSnapshotDurationMilliseconds.WithLabelValues(
+			fmt.Sprint(len(engine.logEntryIndexesBySegmentID)),
+			fmt.Sprint(len(snapshotBytes)),
+			fmt.Sprint(len(compressedSnapshotEntryBytes)),
+		).Observe(
+			float64(time.Since(start).Milliseconds()),
+		)
+	}()
 
 	compressedSnapshotEntryBytes, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		return err
 	}
 
-	snapshotBytes, err := uncompressBytes(compressedSnapshotEntryBytes)
+	snapshotBytes, err = uncompressBytes(compressedSnapshotEntryBytes)
 	if err != nil {
 		return err
 	}
@@ -517,21 +680,6 @@ func (engine *Engine) loadSnapshot(fileName string) error {
 	for segmentID := range engine.logEntryIndexesBySegmentID {
 		engine.segmentsMetadataList.Add(segmentID)
 	}
-
-	EngineLoadSnapshotDurationNanoseconds.WithLabelValues(
-		fmt.Sprint(len(engine.logEntryIndexesBySegmentID)),
-		fmt.Sprint(len(snapshotBytes)),
-		fmt.Sprint(len(compressedSnapshotEntryBytes)),
-	).Observe(
-		float64(time.Since(start).Nanoseconds()),
-	)
-	EngineLoadSnapshotDurationMilliseconds.WithLabelValues(
-		fmt.Sprint(len(engine.logEntryIndexesBySegmentID)),
-		fmt.Sprint(len(snapshotBytes)),
-		fmt.Sprint(len(compressedSnapshotEntryBytes)),
-	).Observe(
-		float64(time.Since(start).Milliseconds()),
-	)
 
 	return nil
 }
@@ -579,6 +727,7 @@ type segmentContext struct {
 // and getting rid of duplicaate log engtries by keys
 func (engine *Engine) compactSegments() error {
 	engine.logger.Debug("compacting segments")
+	start := time.Now()
 
 	files, err := ioutil.ReadDir(getSegmentsPath())
 	if err != nil {
@@ -592,6 +741,26 @@ func (engine *Engine) compactSegments() error {
 	jobCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	segmentsToDelete := make([]segmentContext, 0)
+
+	defer func() {
+		EngineCompactSegmentsDurationNanoseconds.WithLabelValues(
+			fmt.Sprint(len(files)),
+			fmt.Sprint(len(segmentsToDelete)),
+			fmt.Sprint(engine.compactorWorkerCount),
+			fmt.Sprint(engine.segmentMaxSize),
+		).Observe(
+			float64(time.Since(start).Nanoseconds()),
+		)
+
+		EngineCompactSegmentsDurationMilliseconds.WithLabelValues(
+			fmt.Sprint(len(files)),
+			fmt.Sprint(len(segmentsToDelete)),
+			fmt.Sprint(engine.compactorWorkerCount),
+			fmt.Sprint(engine.segmentMaxSize),
+		).Observe(
+			float64(time.Since(start).Milliseconds()),
+		)
+	}()
 
 	// start compaction workers
 	for i := 1; i <= engine.compactorWorkerCount; i++ {
@@ -717,8 +886,25 @@ func (engine *Engine) compactSegments() error {
 func (engine *Engine) compactSnapshots() error {
 	engine.logger.Debug("compacting snapshots")
 
-	deletedCount := 0
+	var files []fs.FileInfo
 	now := time.Now()
+	deletedCount := 0
+
+	defer func() {
+		EngineCompactSnapshotsDurationNanoseconds.WithLabelValues(
+			fmt.Sprintln(len(files)),
+			fmt.Sprint(deletedCount),
+		).Observe(
+			float64(time.Since(now).Nanoseconds()),
+		)
+
+		EngineCompactSnapshotsDurationMilliseconds.WithLabelValues(
+			fmt.Sprintln(len(files)),
+			fmt.Sprint(deletedCount),
+		).Observe(
+			float64(time.Since(now).Milliseconds()),
+		)
+	}()
 
 	files, err := ioutil.ReadDir(getSnapshotsPath())
 	if err != nil {
@@ -763,6 +949,9 @@ func (engine *Engine) startCompactors(ctx context.Context) error {
 
 					engine.isCompactingSegments = false
 				}
+
+				EngineSegmentsCompactionCount.Inc()
+
 				engine.mu.Unlock()
 			}
 		}
@@ -785,6 +974,8 @@ func (engine *Engine) startCompactors(ctx context.Context) error {
 					}
 
 					engine.isCompactingSnapshots = false
+
+					EngineSnapshotsCompactionCount.Inc()
 				}
 			}
 		}

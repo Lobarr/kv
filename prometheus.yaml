@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 10ms
+
+scrape_configs:
+  - job_name: kv
+    honor_labels: true
+    static_configs:
+      - targets: [ "localhost:9999" ]
