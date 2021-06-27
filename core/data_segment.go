@@ -36,12 +36,12 @@ var (
 		Help: "how long it takes to get a log entry to a data segment",
 	}, []string{"segment_id", "key", "value_size"})
 
-	CloseDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	CloseDataSegmentDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "data_segment_close_duration_nanoseconds",
 		Help: "how long it takes to close a data segment",
 	}, []string{"segment_id", "entries_count", "file_size"})
 
-	CloseDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	CloseDataSegmentDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "data_segment_close_duration_milliseconds",
 		Help: "how long it takes to close a data segment",
 	}, []string{"segment_id", "entries_count", "file_size"})
@@ -211,14 +211,14 @@ func (ds *dataSegment) close() error {
 
 		ds.isClosed = true
 
-		CloseDurationNanoseconds.WithLabelValues(
+		CloseDataSegmentDurationNanoseconds.WithLabelValues(
 			ds.id,
 			fmt.Sprint(ds.entriesCount),
 			fmt.Sprint(fileStat.Size()),
 		).Observe(
 			float64(time.Since(start).Nanoseconds()),
 		)
-		CloseDurationMilliseconds.WithLabelValues(
+		CloseDataSegmentDurationMilliseconds.WithLabelValues(
 			ds.id,
 			fmt.Sprint(ds.entriesCount),
 			fmt.Sprint(fileStat.Size()),

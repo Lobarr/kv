@@ -15,8 +15,71 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"github.com/vmihailenco/msgpack/v5"
+)
+
+var (
+	EngineCaptureSnapshotDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_capture_snapshot_duration_nanoseconds",
+		Help: "how long it takes to capture a snapshot",
+	}, []string{"log_entry_indexes_length", "snapshot_entry_size", "compressed_snapshot_entry_size"})
+
+	EngineCaptureSnapshotDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_capture_snapshot_duration_milliseconds",
+		Help: "how long it takes to capture a snapshot",
+	}, []string{"log_entry_indexes_length", "snapshot_entry_size", "compressed_snapshot_entry_size"})
+
+	EngineLoadSnapshotDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_load_snapshot_duration_nanoseconds",
+		Help: "how long it takes to load a snapshot",
+	}, []string{"log_entry_indexes_length", "snapshot_entry_size", "compressed_snapshot_entry_size"})
+
+	EngineLoadSnapshotDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_load_snapshot_duration_nanoseconds",
+		Help: "how long it takes to load a snapshot",
+	}, []string{"log_entry_indexes_length", "snapshot_entry_size", "compressed_snapshot_entry_size"})
+
+	EngineRolloverSegmentDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_rollover_segment_duration_nanoseconds",
+		Help: "how long it takes to switch to a new data segment when current gets full",
+	}, []string{"segment_id", "segment_entries_count"})
+
+	EngineRolloverSegmentDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_rollover_segment_duration_milliseconds",
+		Help: "how long it takes to switch to a new data segment when current gets full",
+	}, []string{"segment_id", "segment_entries_count"})
+
+	EngineSetDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_set_duration_nanoseconds",
+		Help: "how long it takes to set a key value pair",
+	}, []string{"segment_id", "segment_entries_count", "key", "value_size"})
+
+	EngineSetDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_set_duration_milliseconds",
+		Help: "how long it takes to set a key value pair",
+	}, []string{"segment_id", "segment_entries_count", "key", "value_size"})
+
+	EngineLoadDataSegmentDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_load_data_segment_duration_nanoseconds",
+		Help: "how long it takes to load a data segment from disk",
+	}, []string{"segment_id", "segment_entries_count", "cache_hit"})
+
+	EngineLoadDataSegmentDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_load_data_segment_duration_milliseconds",
+		Help: "how long it takes to load a data segment from disk",
+	}, []string{"segment_id", "segment_size", "cache_hit"})
+
+	EngineFindLogEntryByKeyDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_find_log_entry_by_key_duration_nanoseconds",
+		Help: "how long it took to find a log entry belonging to a key",
+	}, []string{"key", "found", "searched_segments_count"})
+
+	EngineFindLogEntryByKeyDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "engine_find_log_entry_by_key_duration_milliseconds",
+		Help: "how long it took to find a log entry belonging to a key",
+	}, []string{"key", "found", "searched_segments_count"})
 )
 
 // ErrKeyNotFound occurs when a key is not found in the data store
@@ -97,6 +160,22 @@ func (engine *Engine) captureSnapshots(ctx context.Context, interval time.Durati
 // this method is expected to be used within a writable thread safe method
 func (engine *Engine) checkDataSegment() error {
 	if engine.segment.entriesCount >= engine.segmentMaxSize {
+		start := time.Now()
+		oldSegment := engine.segment
+		defer func() {
+			EngineRolloverSegmentDurationNanoseconds.WithLabelValues(
+				oldSegment.id,
+				fmt.Sprint(oldSegment.entriesCount),
+			).Observe(
+				float64(time.Since(start).Nanoseconds()),
+			)
+			EngineRolloverSegmentDurationMilliseconds.WithLabelValues(
+				oldSegment.id,
+				fmt.Sprint(oldSegment.entriesCount),
+			).Observe(
+				float64(time.Since(start).Milliseconds()),
+			)
+		}()
 
 		// switch to new segment
 		if err := engine.segment.close(); err != nil {
@@ -136,6 +215,26 @@ func (engine *Engine) addLogEntryIndex(key string, logEntryIndex *LogEntryIndex)
 
 // Set stores a key and it's associated value
 func (engine *Engine) Set(key, value string) error {
+	start := time.Now()
+	defer func() {
+		EngineSetDurationNanoseconds.WithLabelValues(
+			engine.segment.id,
+			fmt.Sprint(engine.segment.entriesCount),
+			key,
+			fmt.Sprint(len(value)),
+		).Observe(
+			float64(time.Since(start).Nanoseconds()),
+		)
+		EngineSetDurationMilliseconds.WithLabelValues(
+			engine.segment.id,
+			fmt.Sprint(engine.segment.entriesCount),
+			key,
+			fmt.Sprint(len(value)),
+		).Observe(
+			float64(time.Since(start).Milliseconds()),
+		)
+	}()
+
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
 
@@ -161,6 +260,7 @@ func (engine *Engine) Set(key, value string) error {
 
 // loadSegment loads a data segment attempting to hit the cache first
 func (engine *Engine) loadSegment(segmentID string) (*dataSegment, error) {
+	start := time.Now()
 	var segment *dataSegment
 	cacheHit, ok := engine.lruSegments.Get(segmentID)
 
@@ -180,17 +280,64 @@ func (engine *Engine) loadSegment(segmentID string) (*dataSegment, error) {
 		engine.logger.Debugf("loaded data segment %s from cache", segmentID)
 	}
 
+	stat, err := segment.file.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	EngineLoadDataSegmentDurationNanoseconds.WithLabelValues(
+		segmentID,
+		fmt.Sprint(stat.Size()),
+		strings.ToLower(strconv.FormatBool(ok)),
+	).Observe(
+		float64(time.Since(start).Nanoseconds()),
+	)
+	EngineLoadDataSegmentDurationMilliseconds.WithLabelValues(
+		segmentID,
+		fmt.Sprint(stat.Size()),
+		strings.ToLower(strconv.FormatBool(ok)),
+	).Observe(
+		float64(time.Since(start).Milliseconds()),
+	)
+
 	return segment, nil
 }
 
 // findLogEntryByKey locates the log entry of provided key by locating
 // the latest data segment containing that key
 func (engine *Engine) findLogEntryByKey(key string) (*LogEntry, error) {
+	start := time.Now()
 	engine.logger.Debugf("searching log entry for key %s", key)
 
 	var segment *dataSegment
 	segments := engine.segmentsMetadataList.GetSegmentIDs()
 	cursor := len(segments) - 1
+
+	defer func() {
+		searchedSegmentsCount := 0
+		found := false
+
+		if segment != nil {
+			searchedSegmentsCount = (len(segments) - cursor) + 1
+			found = true
+		}
+
+		EngineFindLogEntryByKeyDurationNanoseconds.WithLabelValues(
+			key,
+			strings.ToLower(strconv.FormatBool(found)),
+			fmt.Sprint(searchedSegmentsCount),
+		).Observe(
+			float64(time.Since(start).Nanoseconds()),
+		)
+
+		EngineFindLogEntryByKeyDurationMilliseconds.WithLabelValues(
+			key,
+			strings.ToLower(strconv.FormatBool(found)),
+			fmt.Sprint(searchedSegmentsCount),
+		).Observe(
+			float64(time.Since(start).Nanoseconds()),
+		)
+	}()
 
 	for cursor >= 0 {
 		segmentID := segments[cursor]
@@ -292,6 +439,7 @@ func (engine *Engine) Close() error {
 // snapshot writes a snapshot of log entry indexes by segment id to disk
 func (engine *Engine) snapshot() error {
 	engine.logger.Debug("snapshotting database state")
+	start := time.Now()
 
 	snapshotEntry, err := newSnapshotEntry(engine.logEntryIndexesBySegmentID)
 	if err != nil {
@@ -321,12 +469,28 @@ func (engine *Engine) snapshot() error {
 		return err
 	}
 
+	EngineCaptureSnapshotDurationNanoseconds.WithLabelValues(
+		fmt.Sprint(len(engine.logEntryIndexesBySegmentID)),
+		fmt.Sprint(len(snapshotEntryBytes)),
+		fmt.Sprint(len(compressedSnapshotEntryBytes)),
+	).Observe(
+		float64(time.Since(start).Nanoseconds()),
+	)
+	EngineCaptureSnapshotDurationMilliseconds.WithLabelValues(
+		fmt.Sprint(len(engine.logEntryIndexesBySegmentID)),
+		fmt.Sprint(len(snapshotEntryBytes)),
+		fmt.Sprint(len(compressedSnapshotEntryBytes)),
+	).Observe(
+		float64(time.Since(start).Milliseconds()),
+	)
+
 	return nil
 }
 
 // loadSnapshot loads snapshot from disk to memory
 func (engine *Engine) loadSnapshot(fileName string) error {
 	engine.logger.Debugf("loading snapshot %s", fileName)
+	start := time.Now()
 
 	compressedSnapshotEntryBytes, err := ioutil.ReadFile(fileName)
 	if err != nil {
@@ -353,6 +517,21 @@ func (engine *Engine) loadSnapshot(fileName string) error {
 	for segmentID := range engine.logEntryIndexesBySegmentID {
 		engine.segmentsMetadataList.Add(segmentID)
 	}
+
+	EngineLoadSnapshotDurationNanoseconds.WithLabelValues(
+		fmt.Sprint(len(engine.logEntryIndexesBySegmentID)),
+		fmt.Sprint(len(snapshotBytes)),
+		fmt.Sprint(len(compressedSnapshotEntryBytes)),
+	).Observe(
+		float64(time.Since(start).Nanoseconds()),
+	)
+	EngineLoadSnapshotDurationMilliseconds.WithLabelValues(
+		fmt.Sprint(len(engine.logEntryIndexesBySegmentID)),
+		fmt.Sprint(len(snapshotBytes)),
+		fmt.Sprint(len(compressedSnapshotEntryBytes)),
+	).Observe(
+		float64(time.Since(start).Milliseconds()),
+	)
 
 	return nil
 }

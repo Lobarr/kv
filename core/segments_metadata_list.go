@@ -3,7 +3,32 @@ package core
 import (
 	"container/heap"
 	"errors"
+	"fmt"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+var (
+	SegmentMetadataListAddDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "segment_metadata_list_add_duration_nanoseconds",
+		Help: "how long it takes to add to the segment metadata list",
+	}, []string{"segment_id", "segment_list_size"})
+
+	SegmentMetadataListAddDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "segment_metadata_list_add_duration_milliseconds",
+		Help: "how long it takes to add to the segment metadata list",
+	}, []string{"segment_id", "segment_list_size"})
+
+	SegmentMetadataListRemoveDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "segment_metadata_list_remove_duration_nanoseconds",
+		Help: "how long it takes to remove to the segment metadata list",
+	}, []string{"segment_id", "segment_list_size"})
+
+	SegmentMetadataListRemoveDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "segment_metadata_list_remove_duration_milliseconds",
+		Help: "how long it takes to remove to the segment metadata list",
+	}, []string{"segment_id", "segment_list_size"})
 )
 
 type SegmentMetadata struct {
@@ -63,12 +88,28 @@ func (segmentMetadataList SegmentMetadataList) GetSegmentIDs() []string {
 }
 
 func (segmentMetadataList *SegmentMetadataList) Add(segmentID string) {
+	start := time.Now()
+
 	segmentMetadata := &SegmentMetadata{segmentID: segmentID, createdAt: time.Now().Unix()}
 	heap.Push(segmentMetadataList._segmentMetadataHeap, segmentMetadata)
 	segmentMetadataList.segmentIDByIndex[segmentMetadata.segmentID] = segmentMetadata.index
+
+	SegmentMetadataListAddDurationNanoseconds.WithLabelValues(
+		segmentID,
+		fmt.Sprint(len(*segmentMetadataList._segmentMetadataHeap)),
+	).Observe(
+		float64(time.Since(start).Nanoseconds()),
+	)
+	SegmentMetadataListAddDurationMilliseconds.WithLabelValues(
+		segmentID,
+		fmt.Sprint(len(*segmentMetadataList._segmentMetadataHeap)),
+	).Observe(
+		float64(time.Since(start).Milliseconds()),
+	)
 }
 
 func (segmentMetadataList *SegmentMetadataList) Remove(segmentID string) error {
+	start := time.Now()
 	index, ok := segmentMetadataList.segmentIDByIndex[segmentID]
 
 	if !ok {
@@ -77,6 +118,20 @@ func (segmentMetadataList *SegmentMetadataList) Remove(segmentID string) error {
 
 	heap.Remove(segmentMetadataList._segmentMetadataHeap, index)
 	delete(segmentMetadataList.segmentIDByIndex, segmentID)
+
+	SegmentMetadataListRemoveDurationNanoseconds.WithLabelValues(
+		segmentID,
+		fmt.Sprint(len(*segmentMetadataList._segmentMetadataHeap)),
+	).Observe(
+		float64(time.Since(start).Nanoseconds()),
+	)
+	SegmentMetadataListRemoveDurationMilliseconds.WithLabelValues(
+		segmentID,
+		fmt.Sprint(len(*segmentMetadataList._segmentMetadataHeap)),
+	).Observe(
+		float64(time.Since(start).Milliseconds()),
+	)
+
 	return nil
 }
 
