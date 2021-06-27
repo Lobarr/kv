@@ -132,7 +132,7 @@ func BenchmarkGet(b *testing.B) {
 }
 
 const ReadsWorkersCount = 100
-const WritesWorkersCount = 5
+const WritesWorkersCount = 3
 const WorkerJobsCount = 10000
 
 func TestConcurrentWrites(t *testing.T) {
@@ -148,7 +148,7 @@ func TestConcurrentWrites(t *testing.T) {
 	for z := 0; z < WritesWorkersCount; z++ {
 		go func(wg *sync.WaitGroup, id int) {
 			for i := 0; i < WorkerJobsCount; i++ {
-				log.Printf("concorrent writes worker %v - job %v", id, i)
+				log.Printf("concurrent writes worker %v - job %v", id, i)
 				if err := engine.Set(randomKey(200, 400), randomString(500)); err != nil {
 					panic(err)
 				}
@@ -185,7 +185,7 @@ func TestConcurrentReads(t *testing.T) {
 	for z := 0; z < ReadsWorkersCount; z++ {
 		go func(wg *sync.WaitGroup, id int) {
 			for i := 0; i < WorkerJobsCount; i++ {
-				log.Printf("concorrent reads worker %v - job %v", id, i)
+				log.Printf("concurrent reads worker %v - job %v", id, i)
 				if _, err := engine.Get(expectedKey); err != nil {
 					panic(err)
 				}
