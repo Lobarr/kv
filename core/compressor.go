@@ -12,22 +12,22 @@ import (
 )
 
 var (
-	compressBytesDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	CompressBytesDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "compress_bytes_duration_nanoseconds",
 		Help: "how long it took to compress an array of bytes",
 	}, []string{"raw_bytes_size", "compressed_bytes_size"})
 
-	compressBytesDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	CompressBytesDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "compress_bytes_duration_milliseconds",
 		Help: "how long it took to compress an array of bytes",
 	}, []string{"raw_bytes_size", "compressed_bytes_size"})
 
-	uncompressBytesDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	UncompressBytesDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "uncompress_bytes_duration_nanoseconds",
 		Help: "how long it took to uncompress an array of bytes",
 	}, []string{"raw_bytes_size", "compressed_bytes_size"})
 
-	uncompressBytesDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	UncompressBytesDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "uncompress_bytes_duration_milliseconds",
 		Help: "how long it took to uncompress an array of bytes",
 	}, []string{"raw_bytes_size", "compressed_bytes_size"})
@@ -48,15 +48,15 @@ func compressBytes(rawBytes []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	compressBytesDurationNanoseconds.With(prometheus.Labels{
-		"raw_bytes_size":        fmt.Sprint(len(rawBytes)),
-		"compressed_bytes_size": fmt.Sprint(compressedBytes.Len()),
-	}).Observe(float64(time.Since(start).Nanoseconds()))
+	CompressBytesDurationNanoseconds.WithLabelValues(
+		fmt.Sprint(len(rawBytes)),
+		fmt.Sprint(compressedBytes.Len()),
+	).Observe(float64(time.Since(start).Nanoseconds()))
 
-	compressBytesDurationMilliseconds.With(prometheus.Labels{
-		"raw_bytes_size":        fmt.Sprint(len(rawBytes)),
-		"compressed_bytes_size": fmt.Sprint(compressedBytes.Len()),
-	}).Observe(float64(time.Since(start).Microseconds()))
+	CompressBytesDurationMilliseconds.WithLabelValues(
+		fmt.Sprint(len(rawBytes)),
+		fmt.Sprint(compressedBytes.Len()),
+	).Observe(float64(time.Since(start).Microseconds()))
 
 	return compressedBytes.Bytes(), nil
 }
@@ -80,13 +80,13 @@ func uncompressBytes(compressedBytes []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	uncompressBytesDurationNanoseconds.WithLabelValues(
+	UncompressBytesDurationNanoseconds.WithLabelValues(
 		fmt.Sprint(len(rawBuffer.Bytes())),
 		fmt.Sprint(len(compressedBytes)),
 	).Observe(
 		float64(time.Since(start).Nanoseconds()),
 	)
-	uncompressBytesDurationMilliseconds.WithLabelValues(
+	UncompressBytesDurationMilliseconds.WithLabelValues(
 		fmt.Sprint(len(rawBuffer.Bytes())),
 		fmt.Sprint(len(compressedBytes)),
 	).Observe(

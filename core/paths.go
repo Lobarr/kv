@@ -1,13 +1,22 @@
 package core
 
 import (
-	"os"
+	"fmt"
 	"path"
 )
 
+var dataPath string
+
 func getDataPath() string {
-	currentWorkingDirectory, _ := os.Getwd()
-	return path.Join(currentWorkingDirectory, "tmp", "hashindex")
+	if len(dataPath) == 0 {
+		panic("datapath has not been set")
+	}
+	return path.Join(dataPath, "hashindex")
+}
+
+func setDataPath(path string) {
+	fmt.Println("set data path")
+	dataPath = path
 }
 
 func getSegmentsPath() string {

@@ -62,6 +62,7 @@ type EngineConfig struct {
 	CompactorInterval          time.Duration // intervals that compaction process occurs
 	CompactorWorkerCount       int           // number of workers compaction process uses
 	SnapshotTTLDuration        time.Duration // snapshot files time to live duration
+	DataPath                   string        // path where store data is persisted on disk
 }
 
 // captureSnapshots captures snapshots at an interval
@@ -661,6 +662,8 @@ func (engine *Engine) recover() error {
 
 //NewEngine creates a new engine
 func NewEngine(config *EngineConfig) (*Engine, error) {
+	setDataPath(config.DataPath)
+
 	for _, dataPath := range []string{getDataPath(), getSegmentsPath(), getSnapshotsPath()} {
 		if _, err := os.Stat(dataPath); os.IsNotExist(err) {
 			err = os.MkdirAll(dataPath, 0777)

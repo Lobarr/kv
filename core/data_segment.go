@@ -16,61 +16,60 @@ import (
 )
 
 var (
-	addLogEntryDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	AddLogEntryDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "data_segment_add_log_entry_duration_nanoseconds",
 		Help: "how long it takes to add a log entry to a data segment",
 	}, []string{"segment_id", "key", "value_size"})
 
-	addLogEntryDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	AddLogEntryDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "data_segment_add_log_entry_duration_milliseconds",
 		Help: "how long it takes to add a log entry to a data segment",
 	}, []string{"segment_id", "key", "value_size"})
 
-	getLogEntryDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	GetLogEntryDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "data_segment_get_log_entry_duration_nanoseconds",
 		Help: "how long it takes to get a log entry to a data segment",
 	}, []string{"segment_id", "key", "value_size"})
 
-	getLogEntryDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	GetLogEntryDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "data_segment_get_log_entry_duration_milliseconds",
 		Help: "how long it takes to get a log entry to a data segment",
 	}, []string{"segment_id", "key", "value_size"})
 
-	closeDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	CloseDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "data_segment_close_duration_nanoseconds",
 		Help: "how long it takes to close a data segment",
 	}, []string{"segment_id", "entries_count", "file_size"})
 
-	closeDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	CloseDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "data_segment_close_duration_milliseconds",
 		Help: "how long it takes to close a data segment",
 	}, []string{"segment_id", "entries_count", "file_size"})
 
-	segmentEntriesCount = promauto.NewCounterVec(prometheus.CounterOpts{
+	SegmentEntriesCount = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "data_segment_entries_count",
 		Help: "number of log entries in a data segment",
 	}, []string{"segment_id"})
 
-	newDataSegmentDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	NewDataSegmentDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "new_data_segment_duration_milliseconds",
 		Help: "how long it takes to initialize a new data segment",
 	}, []string{"segment_id"})
 
-	newDataSegmentDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	NewDataSegmentDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "new_data_segment_duration_nanoseconds",
 		Help: "how long it takes to initialize a new data segment",
 	}, []string{"segment_id"})
 
-	loadDataSegmentDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	LoadDataSegmentDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "load_data_segment_duration_milliseconds",
 		Help: "how long it takes to load a data segment from disk",
 	}, []string{"segment_id"})
 
-	loadDataSegmentDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	LoadDataSegmentDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "load_data_segment_duration_nanoseconds",
 		Help: "how long it takes to load a data segment from disk",
 	}, []string{"segment_id"})
-
 )
 
 //ErrClosedDataSegment occurs when an attempt to write to a closed data segment is made
@@ -101,9 +100,6 @@ func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 		return nil, ErrClosedDataSegment
 	}
 
-	ds.mu.Lock()
-	defer ds.mu.Unlock()
-
 	logEntryBytes, err := logEntry.Encode()
 	if err != nil {
 		return nil, err
@@ -113,6 +109,9 @@ func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
 
 	startOffset := ds.offset
 	logEntryBytesWithSeperator := bytes.Join([][]byte{compressedLogEntryBytes, make([]byte, 0)}, LogEntrySeperator)
@@ -127,17 +126,17 @@ func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 
 	ds.logger.Debugf("new data segment state : offset = %d entriesCount = %d", ds.offset, ds.entriesCount)
 
-	addLogEntryDurationNanoseconds.WithLabelValues(
+	AddLogEntryDurationNanoseconds.WithLabelValues(
 		ds.id, logEntry.Key, fmt.Sprint((logEntry.Value)),
 	).Observe(
 		float64(time.Since(start).Nanoseconds()),
 	)
-	addLogEntryDurationMilliseconds.WithLabelValues(
+	AddLogEntryDurationMilliseconds.WithLabelValues(
 		ds.id, logEntry.Key, fmt.Sprint((logEntry.Value)),
 	).Observe(
 		float64(time.Since(start).Milliseconds()),
 	)
-	segmentEntriesCount.WithLabelValues(ds.id).Inc()
+	SegmentEntriesCount.WithLabelValues(ds.id).Inc()
 
 	return &LogEntryIndex{
 		Key:                 logEntry.Key,
@@ -174,14 +173,14 @@ func (ds *dataSegment) getLogEntry(logEntryIndex *LogEntryIndex) (*LogEntry, err
 		return nil, err
 	}
 
-	getLogEntryDurationNanoseconds.WithLabelValues(
+	GetLogEntryDurationNanoseconds.WithLabelValues(
 		ds.id,
 		logEntry.Key,
 		fmt.Sprint(len(logEntry.Value)),
 	).Observe(
 		float64(time.Since(start).Nanoseconds()),
 	)
-	getLogEntryDurationMilliseconds.WithLabelValues(
+	GetLogEntryDurationMilliseconds.WithLabelValues(
 		ds.id,
 		logEntry.Key,
 		fmt.Sprint(len(logEntry.Value)),
@@ -201,32 +200,32 @@ func (ds *dataSegment) close() error {
 	if !ds.isClosed {
 		ds.logger.Debug("closing data segment")
 
+		fileStat, err := ds.file.Stat()
+		if err != nil {
+			return err
+		}
+
 		if err := ds.file.Close(); err != nil {
 			return err
 		}
 
 		ds.isClosed = true
-	}
 
-	fileStat, err := ds.file.Stat()
-	if err != nil {
-		return err
+		CloseDurationNanoseconds.WithLabelValues(
+			ds.id,
+			fmt.Sprint(ds.entriesCount),
+			fmt.Sprint(fileStat.Size()),
+		).Observe(
+			float64(time.Since(start).Nanoseconds()),
+		)
+		CloseDurationMilliseconds.WithLabelValues(
+			ds.id,
+			fmt.Sprint(ds.entriesCount),
+			fmt.Sprint(fileStat.Size()),
+		).Observe(
+			float64(time.Since(start).Milliseconds()),
+		)
 	}
-
-	closeDurationNanoseconds.WithLabelValues(
-		ds.id, 
-		fmt.Sprint(ds.entriesCount),
-		fmt.Sprint(fileStat.Size()),
-	).Observe(
-		float64(time.Since(start).Nanoseconds()),
-	)
-	closeDurationMilliseconds.WithLabelValues(
-		ds.id, 
-		fmt.Sprint(ds.entriesCount),
-		fmt.Sprint(fileStat.Size()),
-	).Observe(
-		float64(time.Since(start).Milliseconds()),
-	)
 
 	return nil
 }
@@ -239,6 +238,7 @@ func computeDataSegmentFileName(id string) string {
 
 // newDataSegment create a new data segment
 func newDataSegment() (*dataSegment, error) {
+	start := time.Now()
 	id := uuid.New().String()
 	fileName := computeDataSegmentFileName(id)
 	file, err := os.OpenFile(fileName, os.O_RDWR|os.O_CREATE, 0644)
@@ -247,7 +247,7 @@ func newDataSegment() (*dataSegment, error) {
 		return nil, err
 	}
 
-	return &dataSegment{
+	segment := &dataSegment{
 		entriesCount: 0,
 		file:         file,
 		fileName:     fileName,
@@ -259,11 +259,21 @@ func newDataSegment() (*dataSegment, error) {
 			"fileName": fileName,
 			"id":       id,
 		}),
-	}, nil
+	}
+
+	NewDataSegmentDurationNanoseconds.WithLabelValues(segment.id).Observe(
+		float64(time.Since(start).Nanoseconds()),
+	)
+	NewDataSegmentDurationMilliseconds.WithLabelValues(segment.id).Observe(
+		float64(time.Since(start).Milliseconds()),
+	)
+
+	return segment, nil
 }
 
 // loadDataSegment loads data segment from disk to memory
 func loadDataSegment(id string) (*dataSegment, error) {
+	start := time.Now()
 	fileName := computeDataSegmentFileName(id)
 	file, err := os.Open(fileName)
 
@@ -271,7 +281,7 @@ func loadDataSegment(id string) (*dataSegment, error) {
 		return nil, err
 	}
 
-	return &dataSegment{
+	segment := &dataSegment{
 		entriesCount: -1,
 		file:         file,
 		fileName:     fileName,
@@ -283,5 +293,18 @@ func loadDataSegment(id string) (*dataSegment, error) {
 			"fileName": fileName,
 			"id":       id,
 		}),
-	}, nil
+	}
+
+	LoadDataSegmentDurationNanoseconds.WithLabelValues(
+		segment.id,
+	).Observe(
+		float64(time.Since(start).Nanoseconds()),
+	)
+	LoadDataSegmentDurationMilliseconds.WithLabelValues(
+		segment.id,
+	).Observe(
+		float64(time.Since(start).Milliseconds()),
+	)
+
+	return segment, nil
 }

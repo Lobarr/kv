@@ -62,13 +62,14 @@ func benchmarkGet(valueSize int, engine *core.Engine, b *testing.B) {
 
 func makeEngine(t testing.TB) (*core.Engine, error) {
 	return core.NewEngine(&core.EngineConfig{
-		SegmentMaxSize:             1000,
+		SegmentMaxSize:             100,
 		SnapshotInterval:           5 * time.Second,
 		TolerableSnapshotFailCount: 5,
 		CacheSize:                  10,
 		CompactorInterval:          10 * time.Second,
 		CompactorWorkerCount:       10,
 		SnapshotTTLDuration:        10 * time.Second,
+		DataPath:                   t.TempDir(),
 	})
 }
 
@@ -130,7 +131,9 @@ func BenchmarkGet(b *testing.B) {
 	})
 }
 
-const WorkersCount = 5
+const ReadsWorkersCount = 100
+const WritesWorkersCount = 5
+const WorkerJobsCount = 10000
 
 func TestConcurrentWrites(t *testing.T) {
 	engine, err := makeEngine(t)
@@ -142,9 +145,9 @@ func TestConcurrentWrites(t *testing.T) {
 	defer engine.Close()
 
 	wg := new(sync.WaitGroup)
-	for z := 0; z < WorkersCount; z++ {
+	for z := 0; z < WritesWorkersCount; z++ {
 		go func(wg *sync.WaitGroup, id int) {
-			for i := 0; i < 10000; i++ {
+			for i := 0; i < WorkerJobsCount; i++ {
 				log.Printf("concorrent writes worker %v - job %v", id, i)
 				if err := engine.Set(randomKey(200, 400), randomString(500)); err != nil {
 					panic(err)
@@ -179,9 +182,9 @@ func TestConcurrentReads(t *testing.T) {
 	}
 
 	wg := new(sync.WaitGroup)
-	for z := 0; z < WorkersCount; z++ {
+	for z := 0; z < ReadsWorkersCount; z++ {
 		go func(wg *sync.WaitGroup, id int) {
-			for i := 0; i < 10000; i++ {
+			for i := 0; i < WorkerJobsCount; i++ {
 				log.Printf("concorrent reads worker %v - job %v", id, i)
 				if _, err := engine.Get(expectedKey); err != nil {
 					panic(err)

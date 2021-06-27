@@ -2,22 +2,35 @@ package core
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/compress"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/helmet/v2"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sherifabdlnaby/configuro"
 	"github.com/sirupsen/logrus"
 )
 
+const ConfigPath = "/kv/config.yaml"
+
 type KvHttpServer struct {
-	server       *fiber.App    // http server instance
-	store        Store         // store instance
-	engineConfig *EngineConfig // store configuration
+	server *fiber.App          // http server instance
+	store  Store               // store instance
+	config *KvHttpServerConfig // server configuration
+}
+
+type KvHttpServerConfig struct {
+	EngineConfig  *EngineConfig // store configuration
+	ExposeMetrics bool          // flag to expose metrics
+	LogLevel      logrus.Level  // sets log level
+	Port          int           // port for http server to listen on
+	MetricsPort   int           // ports for expose metrics server to listen on
 }
 
 func (kv *KvHttpServer) handleGetRequest(ctx *fiber.Ctx) error {
@@ -89,13 +102,16 @@ func (kv *KvHttpServer) setupInterruptHandler() {
 }
 
 func (kv *KvHttpServer) loadConfigs() error {
-	config, err := configuro.NewConfig(configuro.WithLoadFromEnvVars("KV"))
+	config, err := configuro.NewConfig(
+		configuro.WithLoadFromEnvVars("KV"),
+		configuro.WithLoadFromConfigFile(ConfigPath, false),
+	)
 
 	if err != nil {
 		return err
 	}
 
-	err = config.Load(kv.engineConfig)
+	err = config.Load(kv.config)
 
 	if err != nil {
 		return err
@@ -109,7 +125,7 @@ func (kv *KvHttpServer) StartServer() error {
 		return err
 	}
 
-	engine, err := NewEngine(kv.engineConfig)
+	engine, err := NewEngine(kv.config.EngineConfig)
 	if err != nil {
 		return err
 	}
@@ -118,26 +134,48 @@ func (kv *KvHttpServer) StartServer() error {
 	kv.setupMiddlewares()
 	kv.setupEndpoints()
 	kv.setupInterruptHandler()
-	port := 8080
 
 	defer kv.store.Close()
 
-	logrus.Infof("starting kv http server on port %d", port)
+	if kv.config.ExposeMetrics {
+		go kv.startMetricsServer()
+	}
 
-	return kv.server.Listen(fmt.Sprintf(":%d", port)) //TODO: make port configurable
+	logrus.Infof("starting kv http server on port %d", kv.config.Port)
+	return kv.server.Listen(fmt.Sprintf(":%d", kv.config.Port)) //TODO: make port configurable
 }
 
-func NewHttpServer() *KvHttpServer {
+func (kv *KvHttpServer) startMetricsServer() error {
+	logrus.Infof("starting kv metrics http server on port %d", kv.config.MetricsPort)
+
+	http.Handle("/metrics", promhttp.Handler())
+	return http.ListenAndServe(fmt.Sprintf(":%d", kv.config.MetricsPort), nil)
+}
+
+func NewHttpServer() (*KvHttpServer, error) {
+	path, err := filepath.Abs(fmt.Sprintf("%s/.kv/data", os.Getenv("HOME")))
+
+	if err != nil {
+		return nil, err
+	}
+
 	return &KvHttpServer{
 		server: fiber.New(),
-		engineConfig: &EngineConfig{
-			SegmentMaxSize:             2000,
-			SnapshotInterval:           5 * time.Second,
-			TolerableSnapshotFailCount: 5,
-			CacheSize:                  100,
-			CompactorInterval:          15 * time.Second,
-			CompactorWorkerCount:       3,
-			SnapshotTTLDuration:        15 * time.Second,
+		config: &KvHttpServerConfig{
+			EngineConfig: &EngineConfig{
+				SegmentMaxSize:             200,
+				SnapshotInterval:           5 * time.Second,
+				TolerableSnapshotFailCount: 5,
+				CacheSize:                  100,
+				CompactorInterval:          10 * time.Second,
+				CompactorWorkerCount:       3,
+				SnapshotTTLDuration:        15 * time.Second,
+				DataPath:                   path,
+			},
+			ExposeMetrics: true,
+			LogLevel:      logrus.InfoLevel,
+			Port:          9998,
+			MetricsPort:   9999,
 		},
-	}
+	}, nil
 }

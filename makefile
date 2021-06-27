@@ -5,12 +5,10 @@ lint:
 	gofmt -d .
 
 test-race:
-	rm -rf ./core/tmp/
 	go test ./... -race -v -timeout 1h
 	go test ./... -race -v -bench=. -timeout 1h
 
 test:
-	rm -rf ./core/tmp/
 	go test ./... -v -cover -timeout 1h
 	go test ./... -v -bench=. -timeout 1h
 
