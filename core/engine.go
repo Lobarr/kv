@@ -773,19 +773,25 @@ func (engine *Engine) compactSegments() error {
 					return
 
 				case jobData := <-jobChan:
-					engine.logger.Debugf("worker %d received job for %s", workerId, jobData.segmentID)
+					engine.logger.Debugf("worker %d received job for segment %s containing %d log entries", workerId, jobData.segmentID, len(jobData.logEntriesBytes))
 
 					latestLogEntries := make(map[string]*LogEntry)
 
-					for _, logEntryBytes := range jobData.logEntriesBytes {
-						if len(logEntryBytes) <= 0 {
+					for _, compresedLogEntryBytes := range jobData.logEntriesBytes {
+						if len(compresedLogEntryBytes) <= 0 {
+							continue
+						}
+
+						logEntryBytes, err := uncompressBytes(compresedLogEntryBytes)
+						if err != nil {
 							continue
 						}
 
 						logEntry := &LogEntry{}
-						err := logEntry.Decode(logEntryBytes)
+						err = logEntry.Decode(logEntryBytes)
 
 						if err != nil {
+							engine.logger.Errorf("unable to decode log entry %s", logEntry.Key)
 							continue
 						}
 
@@ -842,6 +848,7 @@ func (engine *Engine) compactSegments() error {
 	})
 
 	for _, compactedSegmentEntry := range compactedSegmentEntries {
+		engine.logger.Debugf("processing compacted segment entry containing %d log entries", len(compactedSegmentEntry.compactedEntries))
 		for key, logEntry := range compactedSegmentEntry.compactedEntries {
 			compactedLogEntries[key] = logEntry
 		}
@@ -852,8 +859,12 @@ func (engine *Engine) compactSegments() error {
 		return err
 	}
 
+	engine.segmentsMetadataList.Add(compactedSegment.id)
+
 	// writes log entries to to compacted segment and index it in memory
 	for _, logEntry := range compactedLogEntries {
+		engine.logger.Debugf("compacting log entry %s", logEntry.Key)
+
 		logEntryIndex, err := compactedSegment.addLogEntry(logEntry)
 		if err != nil {
 			return err
@@ -862,7 +873,9 @@ func (engine *Engine) compactSegments() error {
 		engine.addLogEntryIndex(logEntry.Key, logEntryIndex)
 	}
 
-	engine.segmentsMetadataList.Add(compactedSegment.id)
+	engine.logger.Debugf("processed %d segments", len(compactedSegmentEntries))
+	engine.logger.Debugf("wrote %d compacted log entries", len(compactedLogEntries))
+
 	if err := compactedSegment.close(); err != nil {
 		return err
 	}
@@ -878,6 +891,8 @@ func (engine *Engine) compactSegments() error {
 		delete(engine.logEntryIndexesBySegmentID, segmentCtx.id)
 		os.Remove(path.Join(getSegmentsPath(), segmentCtx.fileName))
 	}
+
+	engine.logger.Debugf("cleaned up %d segments", len(segmentsToDelete))
 
 	return nil
 }

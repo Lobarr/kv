@@ -3,7 +3,6 @@ package core_test
 import (
 	"fmt"
 	"kv/core"
-	"log"
 	"math/rand"
 	"os"
 	"sync"
@@ -15,7 +14,7 @@ import (
 )
 
 func init() {
-	logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetLevel(logrus.InfoLevel)
 	logrus.SetOutput(os.Stdout)
 }
 
@@ -161,7 +160,7 @@ func TestConcurrentWrites(t *testing.T) {
 				keysLengthWritten += len(key)
 				valuesLengthWritten += len(value)
 
-				log.Printf("concurrent writes worker %d - job %d - key size %d - value size %d", id, i, len(key), len(value))
+				logrus.Printf("concurrent writes worker %d - job %d - key size %d - value size %d", id, i, len(key), len(value))
 
 				if err := engine.Set(key, value); err != nil {
 					panic(err)
@@ -177,7 +176,7 @@ func TestConcurrentWrites(t *testing.T) {
 	jobCount := WritesWorkersCount * WritesJobsCount
 	duration := time.Since(start).Seconds()
 	rate := float64(jobCount) / duration
-	log.Printf(
+	logrus.Printf(
 		"total writes %d - %f writes/s - duration %fs - keys written %s - values written %s",
 		jobCount, rate, duration, humanize.Bytes(uint64(keysLengthWritten)), humanize.Bytes(uint64(valuesLengthWritten)),
 	)
@@ -212,7 +211,7 @@ func TestConcurrentReads(t *testing.T) {
 				keyIndex := rand.Intn(keysLength)
 				key := keys[keyIndex]
 
-				log.Printf("concurrent reads worker %d - job %d - key size %d - key index %d", id, i, len(key), keyIndex)
+				logrus.Printf("concurrent reads worker %d - job %d - key size %d - key index %d", id, i, len(key), keyIndex)
 
 				if _, err := engine.Get(key); err != nil {
 					panic(fmt.Sprintf("%v: key - %s", err, key))
@@ -228,7 +227,7 @@ func TestConcurrentReads(t *testing.T) {
 	jobCount := ReadsWorkersCount * ReadsJobsCount
 	duration := time.Since(start).Seconds()
 	rate := float64(jobCount) / duration
-	log.Printf(
+	logrus.Printf(
 		"total reads %d - %f reads/s - duration %fs",
 		jobCount, rate, duration,
 	)
