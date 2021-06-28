@@ -177,9 +177,16 @@ func TestConcurrentReads(t *testing.T) {
 
 	defer engine.Close()
 
-	expectedKey := randomKey(200, 400)
-	if err := engine.Set(expectedKey, randomString(1000)); err != nil {
-		t.Fatal(err)
+	const keysLength int = 500
+	keys := make([]string, keysLength)
+
+	for i := 0; i < 1000; i++ {
+		expectedKey := randomKey(200, 400)
+		keys[i] = expectedKey
+
+		if err := engine.Set(expectedKey, randomString(1000)); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	wg := new(sync.WaitGroup)
@@ -187,7 +194,7 @@ func TestConcurrentReads(t *testing.T) {
 		go func(wg *sync.WaitGroup, id int) {
 			for i := 0; i < ReadsJobsCount; i++ {
 				log.Printf("concurrent reads worker %v - job %v", id, i)
-				if _, err := engine.Get(expectedKey); err != nil {
+				if _, err := engine.Get(keys[rand.Intn(keysLength)]); err != nil {
 					panic(err)
 				}
 			}
