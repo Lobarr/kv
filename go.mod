@@ -4,6 +4,7 @@ go 1.15
 
 require (
 	github.com/andybalholm/brotli v1.0.1 // indirect
+	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/gofiber/fiber/v2 v2.3.3
 	github.com/gofiber/helmet/v2 v2.1.0
 	github.com/google/uuid v1.1.2

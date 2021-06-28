@@ -1,7 +1,6 @@
 package core
 
 import (
-	"fmt"
 	"path"
 )
 
@@ -15,7 +14,6 @@ func getDataPath() string {
 }
 
 func setDataPath(path string) {
-	fmt.Println("set data path")
 	dataPath = path
 }
 
