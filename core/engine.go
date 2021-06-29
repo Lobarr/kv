@@ -924,9 +924,10 @@ func (engine *Engine) compactSegments() error {
 		return compactedSegmentEntries[a].timestamp < compactedSegmentEntries[b].timestamp
 	})
 
-	for _, compactedSegmentEntry := range compactedSegmentEntries {
-		engine.logger.Debugf("processing compacted segment entry containing %d log entries", len(compactedSegmentEntry.compactedEntries))
+	for i, compactedSegmentEntry := range compactedSegmentEntries {
+		engine.logger.Debugf("processing compacted segment entry %d containing %d log entries", i, len(compactedSegmentEntry.compactedEntries))
 		for key, logEntry := range compactedSegmentEntry.compactedEntries {
+			engine.logger.Debugf("processing log entry %s in compacted segment %d", key, i)
 			compactedLogEntries[key] = logEntry
 		}
 	}
