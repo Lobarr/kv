@@ -723,24 +723,140 @@ type segmentContext struct {
 	id       string
 }
 
+type segmentJobContext struct {
+	ctx                         context.Context
+	mu                          *sync.Mutex
+	wg                          *sync.WaitGroup
+	jobChan                     chan *jobContext
+	compactedSegmentEntriesChan chan compactedSegmentEntriesContext
+}
+
+func (engine Engine) startCompactionWorkers(s *segmentJobContext) {
+	for i := 1; i <= engine.compactorWorkerCount; i++ {
+		engine.logger.Debugf("starting compaction worker %d", i)
+		go engine.processSegmentJobs(i, s)
+	}
+}
+
+func (engine Engine) processSegmentJobs(workerId int, s *segmentJobContext) {
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+
+		case jobData := <-s.jobChan:
+			engine.logger.Debugf("worker %d received job for segment %s containing %d log entries", workerId, jobData.segmentID, len(jobData.logEntriesBytes))
+
+			latestLogEntries := make(map[string]*LogEntry)
+
+			for _, compresedLogEntryBytes := range jobData.logEntriesBytes {
+				if len(compresedLogEntryBytes) <= 0 {
+					continue
+				}
+
+				logEntryBytes, err := uncompressBytes(compresedLogEntryBytes)
+				if err != nil {
+					continue
+				}
+
+				logEntry := &LogEntry{}
+				err = logEntry.Decode(logEntryBytes)
+
+				if err != nil {
+					engine.logger.Errorf("unable to decode log entry %s", logEntry.Key)
+					continue
+				}
+
+				latestLogEntries[logEntry.Key] = logEntry
+			}
+
+			s.mu.Lock()
+			s.compactedSegmentEntriesChan <- compactedSegmentEntriesContext{
+				compactedEntries: latestLogEntries,
+				timestamp:        jobData.timestamp,
+			}
+			s.mu.Unlock()
+			s.wg.Done()
+		}
+	}
+}
+
+func (engine Engine) dispatcSegmentJobs(
+	files []fs.FileInfo,
+	wg *sync.WaitGroup,
+	jobChan chan *jobContext,
+) ([]segmentContext, error) {
+	segmentsToDelete := make([]segmentContext, 0)
+
+	for _, file := range files {
+		if !strings.Contains(file.Name(), ".segment") || engine.segment.fileName == file.Name() {
+			continue
+		}
+
+		segmentID := strings.Split(file.Name(), ".")[0]
+		segmentContentBytes, err := ioutil.ReadFile(path.Join(getSegmentsPath(), file.Name()))
+
+		if err != nil {
+			return []segmentContext{}, err
+		}
+
+		wg.Add(1)
+
+		logEntriesBytes := bytes.Split(segmentContentBytes, LogEntrySeperator)
+		jobChan <- &jobContext{
+			timestamp:       file.ModTime().Unix(),
+			logEntriesBytes: logEntriesBytes,
+			segmentID:       segmentID,
+		}
+		segmentsToDelete = append(segmentsToDelete, segmentContext{
+			fileName: file.Name(),
+			id:       segmentID,
+		})
+	}
+
+	return segmentsToDelete, nil
+}
+
+func (engine Engine) persistCompectedSegment(compactedLogEntries map[string]*LogEntry, compactedSegment *dataSegment) error {
+	for _, logEntry := range compactedLogEntries {
+		engine.logger.Debugf("compacting log entry %s", logEntry.Key)
+
+		logEntryIndex, err := compactedSegment.addLogEntry(logEntry)
+		if err != nil {
+			return err
+		}
+
+		engine.addLogEntryIndex(logEntry.Key, logEntryIndex)
+	}
+
+	if err := compactedSegment.close(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (engine Engine) cleanUpStaleSegments(segmentsToDelete []segmentContext, compactedLogEntries map[string]*LogEntry) error {
+	for _, segmentCtx := range segmentsToDelete {
+		engine.lruSegments.Remove(segmentCtx.id)
+		delete(engine.logEntryIndexesBySegmentID, segmentCtx.id)
+		err := engine.segmentsMetadataList.Remove(segmentCtx.id)
+		if err != nil {
+			return err
+		}
+		os.Remove(path.Join(getSegmentsPath(), segmentCtx.fileName))
+	}
+
+	return nil
+}
+
 // compactSegments compacts data segments by joining closed segments together
 // and getting rid of duplicaate log engtries by keys
 func (engine *Engine) compactSegments() error {
 	engine.logger.Debug("compacting segments")
 	start := time.Now()
-
-	files, err := ioutil.ReadDir(getSegmentsPath())
-	if err != nil {
-		return err
-	}
-
-	compactedSegmentEntries := make([]compactedSegmentEntriesContext, 0)
-	wg := new(sync.WaitGroup)
-	mu := new(sync.Mutex)
-	jobChan := make(chan *jobContext)
-	jobCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	segmentsToDelete := make([]segmentContext, 0)
+	files := make([]fs.FileInfo, 0)
 
 	defer func() {
 		EngineCompactSegmentsDurationNanoseconds.WithLabelValues(
@@ -762,84 +878,45 @@ func (engine *Engine) compactSegments() error {
 		)
 	}()
 
-	// start compaction workers
-	for i := 1; i <= engine.compactorWorkerCount; i++ {
-		engine.logger.Debugf("starting compaction worker %d", i)
-
-		go func(ctx context.Context, workerId int) {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-
-				case jobData := <-jobChan:
-					engine.logger.Debugf("worker %d received job for segment %s containing %d log entries", workerId, jobData.segmentID, len(jobData.logEntriesBytes))
-
-					latestLogEntries := make(map[string]*LogEntry)
-
-					for _, compresedLogEntryBytes := range jobData.logEntriesBytes {
-						if len(compresedLogEntryBytes) <= 0 {
-							continue
-						}
-
-						logEntryBytes, err := uncompressBytes(compresedLogEntryBytes)
-						if err != nil {
-							continue
-						}
-
-						logEntry := &LogEntry{}
-						err = logEntry.Decode(logEntryBytes)
-
-						if err != nil {
-							engine.logger.Errorf("unable to decode log entry %s", logEntry.Key)
-							continue
-						}
-
-						latestLogEntries[logEntry.Key] = logEntry
-					}
-
-					mu.Lock()
-					compactedSegmentEntries = append(compactedSegmentEntries, compactedSegmentEntriesContext{
-						compactedEntries: latestLogEntries,
-						timestamp:        jobData.timestamp,
-					})
-					mu.Unlock()
-					wg.Done()
-				}
-			}
-		}(jobCtx, i)
+	files, err := ioutil.ReadDir(getSegmentsPath())
+	if err != nil {
+		return err
 	}
 
+	compactedSegmentEntriesChan := make(chan compactedSegmentEntriesContext, len(files))
+	compactedSegmentEntries := make([]compactedSegmentEntriesContext, len(files))
+	compactedLogEntries := make(map[string]*LogEntry)
+	wg := new(sync.WaitGroup)
+	mu := new(sync.Mutex)
+	jobChan := make(chan *jobContext, 10)
+	jobCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// start compaction workers
+	engine.startCompactionWorkers(&segmentJobContext{
+		ctx:                         jobCtx,
+		mu:                          mu,
+		wg:                          wg,
+		jobChan:                     jobChan,
+		compactedSegmentEntriesChan: compactedSegmentEntriesChan,
+	})
+
 	// send compaction jobs to workers through shared channel
-	for _, file := range files {
-		if !strings.Contains(file.Name(), ".segment") || engine.segment.fileName == file.Name() {
-			continue
-		}
-
-		segmentID := strings.Split(file.Name(), ".")[0]
-		segmentContentBytes, err := ioutil.ReadFile(path.Join(getSegmentsPath(), file.Name()))
-
-		if err != nil {
-			return err
-		}
-
-		wg.Add(1)
-
-		logEntriesBytes := bytes.Split(segmentContentBytes, LogEntrySeperator)
-		jobChan <- &jobContext{
-			timestamp:       file.ModTime().Unix(),
-			logEntriesBytes: logEntriesBytes,
-			segmentID:       segmentID,
-		}
-		segmentsToDelete = append(segmentsToDelete, segmentContext{
-			fileName: file.Name(),
-			id:       segmentID,
-		})
+	segmentsToDelete, err = engine.dispatcSegmentJobs(
+		files,
+		wg,
+		jobChan,
+	)
+	if err != nil {
+		return err
 	}
 
 	wg.Wait()
+	close(compactedSegmentEntriesChan)
 
-	compactedLogEntries := make(map[string]*LogEntry)
+	for compactedSegmentEntry := range compactedSegmentEntriesChan {
+		compactedSegmentEntries = append(compactedSegmentEntries, compactedSegmentEntry)
+	}
 
 	// sorts compacted segment entries by timestamp in order to have the latest
 	// keys updated last
@@ -859,39 +936,18 @@ func (engine *Engine) compactSegments() error {
 		return err
 	}
 
-	engine.segmentsMetadataList.Add(compactedSegment.id)
-
 	// writes log entries to to compacted segment and index it in memory
-	for _, logEntry := range compactedLogEntries {
-		engine.logger.Debugf("compacting log entry %s", logEntry.Key)
-
-		logEntryIndex, err := compactedSegment.addLogEntry(logEntry)
-		if err != nil {
-			return err
-		}
-
-		engine.addLogEntryIndex(logEntry.Key, logEntryIndex)
-	}
+	engine.persistCompectedSegment(
+		compactedLogEntries,
+		compactedSegment,
+	)
+	engine.segmentsMetadataList.Add(compactedSegment.id)
 
 	engine.logger.Debugf("processed %d segments", len(compactedSegmentEntries))
 	engine.logger.Debugf("wrote %d compacted log entries", len(compactedLogEntries))
 
-	if err := compactedSegment.close(); err != nil {
-		return err
-	}
-
 	// clean up segment references from memory
-	for _, segmentCtx := range segmentsToDelete {
-		err = engine.segmentsMetadataList.Remove(segmentCtx.id)
-		if err != nil {
-			return err
-		}
-
-		engine.lruSegments.Remove(segmentCtx.id)
-		delete(engine.logEntryIndexesBySegmentID, segmentCtx.id)
-		os.Remove(path.Join(getSegmentsPath(), segmentCtx.fileName))
-	}
-
+	engine.cleanUpStaleSegments(segmentsToDelete, compactedLogEntries)
 	engine.logger.Debugf("cleaned up %d segments", len(segmentsToDelete))
 
 	return nil
