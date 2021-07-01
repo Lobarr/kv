@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
+	"github.com/schollz/progressbar/v3"
 	"github.com/sirupsen/logrus"
 )
 
@@ -140,6 +141,8 @@ const WritesJobsCount = 500
 func TestConcurrentWrites(t *testing.T) {
 	start := time.Now()
 	engine, err := makeEngine(t)
+	jobCount := WritesWorkersCount * WritesJobsCount
+	bar := progressbar.Default(int64(jobCount))
 
 	if err != nil {
 		t.Fatal(err)
@@ -160,11 +163,14 @@ func TestConcurrentWrites(t *testing.T) {
 				keysLengthWritten += len(key)
 				valuesLengthWritten += len(value)
 
-				logrus.Printf("concurrent writes worker %d - job %d - key size %d - value size %d", id, i, len(key), len(value))
+				// logrus.Printf("concurrent writes worker %d - job %d - key size %d - value size %d", id, i, len(key), len(value))
 
 				if err := engine.Set(key, value); err != nil {
 					panic(err)
 				}
+
+				// bar.Incr()
+				bar.Add(1)
 			}
 			wg.Done()
 		}(wg, z)
@@ -173,7 +179,6 @@ func TestConcurrentWrites(t *testing.T) {
 
 	wg.Wait()
 
-	jobCount := WritesWorkersCount * WritesJobsCount
 	duration := time.Since(start).Seconds()
 	rate := float64(jobCount) / duration
 	logrus.Printf(
@@ -185,6 +190,8 @@ func TestConcurrentWrites(t *testing.T) {
 func TestConcurrentReads(t *testing.T) {
 	start := time.Now()
 	engine, err := makeEngine(t)
+	jobCount := ReadsWorkersCount * ReadsJobsCount
+	bar := progressbar.Default(int64(jobCount))
 
 	if err != nil {
 		t.Fatal(err)
@@ -211,11 +218,13 @@ func TestConcurrentReads(t *testing.T) {
 				keyIndex := rand.Intn(keysLength)
 				key := keys[keyIndex]
 
-				logrus.Printf("concurrent reads worker %d - job %d - key size %d - key index %d", id, i, len(key), keyIndex)
+				// logrus.Printf("concurrent reads worker %d - job %d - key size %d - key index %d", id, i, len(key), keyIndex)
 
 				if _, err := engine.Get(key); err != nil {
 					panic(fmt.Sprintf("%v: key - %s", err, key))
 				}
+
+				bar.Add(1)
 			}
 			wg.Done()
 		}(wg, z)
@@ -224,7 +233,6 @@ func TestConcurrentReads(t *testing.T) {
 
 	wg.Wait()
 
-	jobCount := ReadsWorkersCount * ReadsJobsCount
 	duration := time.Since(start).Seconds()
 	rate := float64(jobCount) / duration
 	logrus.Printf(
