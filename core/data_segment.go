@@ -94,7 +94,7 @@ type dataSegment struct {
 // addLogEntry adds a log entry to the data segment
 func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 	start := time.Now()
-	ds.logger.Debugf("adding log entry %s to segment", logEntry.Key)
+	ds.logger.Debugf("adding log entry %s to segment %s", logEntry.Key, ds.id)
 
 	if ds.isClosed {
 		return nil, ErrClosedDataSegment
@@ -109,6 +109,8 @@ func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	ds.logger.Debugf("writing compressed bytes of size %d for log entry %s to segment %s", len(compressedLogEntryBytes), logEntry.Key, ds.id)
 
 	ds.mu.Lock()
 	defer ds.mu.Unlock()

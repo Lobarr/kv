@@ -2,7 +2,7 @@ package core
 
 import (
 	"bytes"
-	"compress/zlib"
+	"compress/flate"
 	"fmt"
 	"io"
 	"time"
@@ -33,13 +33,17 @@ var (
 	}, []string{"raw_bytes_size", "compressed_bytes_size"})
 )
 
-// compressBytes compresses an input byte array using zlib
+// compressBytes compresses an input byte array using flate
 func compressBytes(rawBytes []byte) ([]byte, error) {
 	start := time.Now()
 	var compressedBytes bytes.Buffer
-	compressor := zlib.NewWriter(&compressedBytes)
 
-	_, err := compressor.Write(rawBytes)
+	compressor, err := flate.NewWriter(&compressedBytes, flate.BestSpeed)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = compressor.Write(rawBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -61,17 +65,13 @@ func compressBytes(rawBytes []byte) ([]byte, error) {
 	return compressedBytes.Bytes(), nil
 }
 
-//uncompresssLogEntryBytes uncompresses a bytes array using zlib
+//uncompresssBytes uncompresses a bytes array using flate
 func uncompressBytes(compressedBytes []byte) ([]byte, error) {
 	start := time.Now()
 	rawBuffer := bytes.NewBuffer(make([]byte, 0))
+	uncompressor := flate.NewReader(bytes.NewReader(compressedBytes))
 
-	uncompressor, err := zlib.NewReader(bytes.NewReader(compressedBytes))
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = io.Copy(rawBuffer, uncompressor)
+	_, err := io.Copy(rawBuffer, uncompressor)
 	if err != nil {
 		return nil, err
 	}
