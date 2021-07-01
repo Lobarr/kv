@@ -1,0 +1,13 @@
+on: push
+name: workflow
+jobs:
+  checks:
+    name: test workflo
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+
+    - name: test stage
+      uses: cedrickring/golang-action@1.6.0
+      with: 
+        args: make test
