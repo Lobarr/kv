@@ -2,7 +2,7 @@ on: push
 name: workflow
 jobs:
   checks:
-    name: test workflo
+    name: test workflow
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@master
@@ -11,3 +11,5 @@ jobs:
       uses: cedrickring/golang-action@1.6.0
       with: 
         args: make test
+      env:
+        GO111MODULE: "on"
