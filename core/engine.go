@@ -240,12 +240,12 @@ func (engine *Engine) checkDataSegment() error {
 			)
 		}()
 
-		// switch to new segment
-		if err := engine.segment.close(); err != nil {
+		if err := engine.snapshot(); err != nil {
 			return err
 		}
 
-		if err := engine.snapshot(); err != nil {
+		// switch to new segment
+		if err := engine.segment.close(); err != nil {
 			return err
 		}
 
@@ -265,15 +265,7 @@ func (engine *Engine) checkDataSegment() error {
 
 // addLogEntryIndex stores log entry index in memory
 func (engine *Engine) addLogEntryIndex(key string, logEntryIndex *LogEntryIndex) {
-	engine.logger.Debugf("adding log entry index for key %s into segment %s", key, engine.segment.id)
-
-	_, ok := engine.logEntryIndexesBySegmentID[engine.segment.id]
-
-	if !ok {
-		engine.logEntryIndexesBySegmentID[engine.segment.id] = make(logEntryIndexByKey)
-	}
-
-	engine.logEntryIndexesBySegmentID[engine.segment.id][key] = logEntryIndex
+	engine.addLogEntryIndexToSegment(engine.segment.id, key, logEntryIndex)
 }
 
 // addLogEntryIndexToSegment stores log entry index in memory withing specific segment
@@ -883,6 +875,10 @@ func (engine Engine) persistCompactedSegment(compactedLogEntries map[string]*Log
 		if err := compactedSegment.close(); err != nil {
 			return err
 		}
+	}
+
+	if err := engine.snapshot(); err != nil {
+		return err
 	}
 
 	return nil
