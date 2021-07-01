@@ -169,8 +169,9 @@ func TestConcurrentWrites(t *testing.T) {
 					panic(err)
 				}
 
-				// bar.Incr()
-				bar.Add(1)
+				if os.Getenv("CI") != "true" {
+					bar.Add(1)
+				}
 			}
 			wg.Done()
 		}(wg, z)
@@ -224,7 +225,9 @@ func TestConcurrentReads(t *testing.T) {
 					panic(fmt.Sprintf("%v: key - %s", err, key))
 				}
 
-				bar.Add(1)
+				if os.Getenv("CI") != "true" {
+					bar.Add(1)
+				}
 			}
 			wg.Done()
 		}(wg, z)
