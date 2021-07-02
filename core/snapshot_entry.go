@@ -1,14 +1,16 @@
 package core
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"encoding/gob"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
-	"github.com/vmihailenco/msgpack/v5"
 	"hash/crc32"
 	"path"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 var ErrInvalidSnapshotEntryChecksum = errors.New("snapshot corrupted")
@@ -26,13 +28,19 @@ func computeSnapshotChecksum(snapshotBytes []byte) uint32 {
 }
 
 func (snapshot *SnapshotEntry) Encode() ([]byte, error) {
-	return msgpack.Marshal(snapshot)
+	var snapshotEntryBytes bytes.Buffer
+	encoder := gob.NewEncoder(&snapshotEntryBytes)
+	err := encoder.Encode(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	return snapshotEntryBytes.Bytes(), nil
 }
 
 func (snapshot *SnapshotEntry) Decode(snapshotBytes []byte) error {
 	snapshotEntry := &SnapshotEntry{}
-	err := msgpack.Unmarshal(snapshotBytes, snapshotEntry)
-
+	decoder := gob.NewDecoder(bytes.NewReader(snapshotBytes))
+	err := decoder.Decode(snapshotEntry)
 	if err != nil {
 		return err
 	}
@@ -54,18 +62,20 @@ func (snapshot SnapshotEntry) ComputeFilename() string {
 }
 
 func newSnapshotEntry(snapshotData interface{}) (*SnapshotEntry, error) {
-	snapshotBytes, err := msgpack.Marshal(snapshotData)
+	var snapshotBuffer bytes.Buffer
+	encoder := gob.NewEncoder(&snapshotBuffer)
+	err := encoder.Encode(snapshotData)
 
 	if err != nil {
 		return nil, err
 	}
 
-	snapshotChecksum := computeSnapshotChecksum(snapshotBytes)
+	snapshotChecksum := computeSnapshotChecksum(snapshotBuffer.Bytes())
 	snapShotID := uuid.New().String()
 	timestamp := time.Now().Unix()
 
 	return &SnapshotEntry{
-		Snapshot:  snapshotBytes,
+		Snapshot:  snapshotBuffer.Bytes(),
 		Checksum:  snapshotChecksum,
 		ID:        snapShotID,
 		Timestamp: timestamp,

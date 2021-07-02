@@ -148,7 +148,7 @@ var (
 var ErrKeyNotFound = errors.New("key not found")
 
 // logEntryIndexByKey map that holds log entries by the associated key
-type logEntryIndexByKey map[string]*LogEntryIndex
+type logEntryIndexByKey map[string]LogEntryIndex
 
 // Engine thread safe storage engine that uses the hash index strategy for keeping track
 // where data is located on disk
@@ -204,13 +204,14 @@ func (engine *Engine) captureSnapshots(ctx context.Context, interval time.Durati
 
 		select {
 		case <-ticker.C:
-			engine.mu.RLock()
+			engine.mu.Lock()
 			err := engine.snapshot()
+			engine.mu.Unlock()
+
 			if err != nil {
 				fmt.Printf("error %s", err)
 				failCounts++
 			}
-			engine.mu.RUnlock()
 		case <-ctx.Done():
 			return
 		}
@@ -224,8 +225,13 @@ func (engine *Engine) checkDataSegment() error {
 	if engine.segment.entriesCount >= engine.segmentMaxSize {
 		start := time.Now()
 		oldSegment := engine.segment
+		var err error
 
 		defer func() {
+			if err != nil {
+				return
+			}
+
 			EngineRolloverSegmentDurationNanoseconds.WithLabelValues(
 				oldSegment.id,
 				fmt.Sprint(oldSegment.entriesCount),
@@ -240,12 +246,12 @@ func (engine *Engine) checkDataSegment() error {
 			)
 		}()
 
-		if err := engine.snapshot(); err != nil {
+		if err = engine.snapshot(); err != nil {
 			return err
 		}
 
 		// switch to new segment
-		if err := engine.segment.close(); err != nil {
+		if err = engine.segment.close(); err != nil {
 			return err
 		}
 
@@ -263,13 +269,8 @@ func (engine *Engine) checkDataSegment() error {
 	return nil
 }
 
-// addLogEntryIndex stores log entry index in memory
-func (engine *Engine) addLogEntryIndex(key string, logEntryIndex *LogEntryIndex) {
-	engine.addLogEntryIndexToSegment(engine.segment.id, key, logEntryIndex)
-}
-
 // addLogEntryIndexToSegment stores log entry index in memory withing specific segment
-func (engine *Engine) addLogEntryIndexToSegment(segmentID string, key string, logEntryIndex *LogEntryIndex) {
+func (engine *Engine) addLogEntryIndexToSegment(segmentID string, key string, logEntryIndex LogEntryIndex) {
 	engine.logger.Debugf("adding log entry index for key %s into segment %s", key, segmentID)
 
 	_, ok := engine.logEntryIndexesBySegmentID[segmentID]
@@ -281,10 +282,21 @@ func (engine *Engine) addLogEntryIndexToSegment(segmentID string, key string, lo
 	engine.logEntryIndexesBySegmentID[segmentID][key] = logEntryIndex
 }
 
+// addLogEntryIndex stores log entry index in memory
+func (engine *Engine) addLogEntryIndex(key string, logEntryIndex LogEntryIndex) {
+	engine.addLogEntryIndexToSegment(engine.segment.id, key, logEntryIndex)
+}
+
 // Set stores a key and it's associated value
 func (engine *Engine) Set(key, value string) error {
 	start := time.Now()
+	var err error
+
 	defer func() {
+		if err != nil {
+			return
+		}
+
 		EngineSetDurationNanoseconds.WithLabelValues(
 			engine.segment.id,
 			fmt.Sprint(engine.segment.entriesCount),
@@ -303,12 +315,11 @@ func (engine *Engine) Set(key, value string) error {
 		)
 	}()
 
-	engine.mu.Lock()
-	defer engine.mu.Unlock()
-
 	engine.logger.Debugf("setting key %s and value %s", key, value)
 
-	err := engine.checkDataSegment()
+	engine.mu.Lock()
+	err = engine.checkDataSegment()
+	engine.mu.Unlock()
 
 	if err != nil {
 		return err
@@ -316,12 +327,13 @@ func (engine *Engine) Set(key, value string) error {
 
 	logEntry := NewLogEntry(key, value)
 	logEntryIndex, err := engine.segment.addLogEntry(logEntry)
-
 	if err != nil {
 		return nil
 	}
 
-	engine.addLogEntryIndex(key, logEntryIndex)
+	engine.mu.Lock()
+	engine.addLogEntryIndex(key, *logEntryIndex)
+	engine.mu.Unlock()
 
 	return nil
 }
@@ -332,8 +344,13 @@ func (engine *Engine) loadSegment(segmentID string) (*dataSegment, error) {
 	var segment *dataSegment
 	var stat fs.FileInfo
 	var ok bool
+	var err error
 
 	defer func() {
+		if err != nil {
+			return
+		}
+
 		EngineLoadDataSegmentDurationNanoseconds.WithLabelValues(
 			segmentID,
 			fmt.Sprint(stat.Size()),
@@ -368,7 +385,7 @@ func (engine *Engine) loadSegment(segmentID string) (*dataSegment, error) {
 		engine.logger.Debugf("loaded data segment %s from cache", segmentID)
 	}
 
-	stat, err := segment.file.Stat()
+	stat, err = segment.file.Stat()
 	if err != nil {
 		return nil, err
 	}
@@ -382,11 +399,16 @@ func (engine *Engine) findLogEntryByKey(key string) (*LogEntry, error) {
 	start := time.Now()
 	engine.logger.Debugf("searching log entry for key %s", key)
 
+	var err error
 	var segment *dataSegment
 	segments := engine.segmentsMetadataList.GetSegmentIDs()
 	cursor := len(segments) - 1
 
 	defer func() {
+		if err != nil {
+			return
+		}
+
 		searchedSegmentsCount := 0
 		found := false
 
@@ -429,7 +451,6 @@ func (engine *Engine) findLogEntryByKey(key string) (*LogEntry, error) {
 		}
 
 		if segmentID != engine.segment.id {
-			var err error
 			segment, err = engine.loadSegment(segmentID)
 
 			if err != nil {
@@ -439,7 +460,7 @@ func (engine *Engine) findLogEntryByKey(key string) (*LogEntry, error) {
 			segment = engine.segment
 		}
 
-		return segment.getLogEntry(logEntryIndex)
+		return segment.getLogEntry(&logEntryIndex)
 	}
 
 	return nil, ErrKeyNotFound
@@ -454,6 +475,10 @@ func (engine *Engine) Get(key string) (string, error) {
 	var err error
 
 	defer func() {
+		if err != nil {
+			return
+		}
+
 		EngineGetDurationNanoseconds.WithLabelValues(
 			key,
 			strings.ToLower(
@@ -503,6 +528,10 @@ func (engine *Engine) Delete(key string) error {
 	start := time.Now()
 
 	defer func() {
+		if err != nil {
+			return
+		}
+
 		EngineDeleteDurationNanoseconds.WithLabelValues(
 			key,
 			strings.ToLower(
@@ -540,7 +569,7 @@ func (engine *Engine) Delete(key string) error {
 		return err
 	}
 
-	engine.addLogEntryIndex(key, logEntryIndex)
+	engine.addLogEntryIndex(key, *logEntryIndex)
 
 	return nil
 }
@@ -567,6 +596,9 @@ func (engine *Engine) Close() error {
 	}()
 
 	engine.logger.Debug("closing database")
+
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
 	engine.ctxCancelFunc()
 
 	if err := engine.snapshot(); err != nil {
@@ -588,8 +620,13 @@ func (engine *Engine) snapshot() error {
 	start := time.Now()
 	var snapshotEntryBytes []byte
 	var compressedSnapshotEntryBytes []byte
+	var err error
 
 	defer func() {
+		if err != nil {
+			return
+		}
+
 		EngineCaptureSnapshotDurationNanoseconds.WithLabelValues(
 			fmt.Sprint(len(engine.logEntryIndexesBySegmentID)),
 			fmt.Sprint(len(snapshotEntryBytes)),
@@ -828,7 +865,7 @@ func (engine Engine) dispatcSegmentJobs(
 
 		logEntryIndexes := make([]LogEntryIndex, len(segmentContentBytes))
 		for _, logEntryIndex := range segmentLogEntryIndexes {
-			logEntryIndexes = append(logEntryIndexes, *logEntryIndex)
+			logEntryIndexes = append(logEntryIndexes, logEntryIndex)
 		}
 
 		jobChan <- &jobContext{
@@ -867,7 +904,7 @@ func (engine Engine) persistCompactedSegment(compactedLogEntries map[string]*Log
 			return err
 		}
 
-		engine.addLogEntryIndexToSegment(compactedSegment.id, logEntry.Key, logEntryIndex)
+		engine.addLogEntryIndexToSegment(compactedSegment.id, logEntry.Key, *logEntryIndex)
 		engine.segmentsMetadataList.Add(compactedSegment.id)
 	}
 
@@ -904,8 +941,13 @@ func (engine *Engine) compactSegments() error {
 	start := time.Now()
 	segmentsToDelete := make([]segmentContext, 0)
 	files := make([]fs.FileInfo, 0)
+	var err error
 
 	defer func() {
+		if err != nil {
+			return
+		}
+
 		EngineCompactSegmentsDurationNanoseconds.WithLabelValues(
 			fmt.Sprint(len(files)),
 			fmt.Sprint(len(segmentsToDelete)),
@@ -925,7 +967,7 @@ func (engine *Engine) compactSegments() error {
 		)
 	}()
 
-	files, err := ioutil.ReadDir(getSegmentsPath())
+	files, err = ioutil.ReadDir(getSegmentsPath())
 	if err != nil {
 		return err
 	}
@@ -979,9 +1021,12 @@ func (engine *Engine) compactSegments() error {
 		}
 	}
 	// writes log entries to to compacted segment and index it in memory
+	engine.mu.Lock()
 	err = engine.persistCompactedSegment(
 		compactedLogEntries,
 	)
+	engine.mu.Unlock()
+
 	if err != nil {
 		engine.logger.Errorf("error occurred when persisting compacted segments %v", err)
 	}
@@ -990,7 +1035,10 @@ func (engine *Engine) compactSegments() error {
 	engine.logger.Debugf("wrote %d compacted log entries", len(compactedLogEntries))
 
 	// clean up segment references from memory
+	engine.mu.Lock()
 	engine.cleanUpStaleSegments(segmentsToDelete, compactedLogEntries)
+	engine.mu.Unlock()
+
 	engine.logger.Debugf("cleaned up %d segments", len(segmentsToDelete))
 
 	for _, segmentCtx := range segmentsToDelete {
@@ -1057,7 +1105,6 @@ func (engine *Engine) startCompactors(ctx context.Context) error {
 				return
 
 			case <-ticker.C:
-				engine.mu.Lock()
 				if !engine.isCompactingSegments && engine.lruSegments.Len() > 1 {
 					engine.isCompactingSegments = true
 
@@ -1069,8 +1116,6 @@ func (engine *Engine) startCompactors(ctx context.Context) error {
 				}
 
 				EngineSegmentsCompactionCount.Inc()
-
-				engine.mu.Unlock()
 			}
 		}
 	}()
@@ -1111,6 +1156,8 @@ func (engine *Engine) startCompactors(ctx context.Context) error {
 // recover recovers database indexes from snapshots
 func (engine *Engine) recover() error {
 	engine.logger.Debug("recovering database state from snapshots")
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
 
 	files, err := ioutil.ReadDir(getSnapshotsPath())
 	if err != nil {
