@@ -25,12 +25,12 @@ const (
 
 var (
 	DataSegmentOperationDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "data_segment/operation_duration_nanoseconds",
+		Name: "data_segment/operation_duration_ns",
 		Help: "how long it takes to perform a data segment operation in nanoseconds",
 	}, []string{"segment_id", "operation"})
 
 	DataSegmentOperationDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "data_segment/operation_duration_milliseconds",
+		Name: "data_segment/operation_duration_ms",
 		Help: "how long it takes to perform a data segment operation in milliseconds",
 	}, []string{"segment_id", "operation"})
 
@@ -76,10 +76,10 @@ func init() {
 	prometheus.Register(DataSegmentCompressedLogEntrySizes)
 }
 
-//ErrClosedDataSegment occurs when an attempt to write to a closed data segment is made
+// ErrClosedDataSegment occurs when an attempt to write to a closed data segment is made
 var ErrClosedDataSegment = errors.New("data segment closed")
 
-//LogEntrySeperator represents seperator used between log entries on disk
+// LogEntrySeperator represents seperator used between log entries on disk
 var LogEntrySeperator = []byte("\n")
 
 // dataSegment represents a portion of the data stored by the data store that

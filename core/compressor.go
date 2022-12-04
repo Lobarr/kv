@@ -12,12 +12,12 @@ import (
 
 var (
 	CompressBytesDurationNanoseconds = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name: "compress_bytes_duration_nanoseconds",
+		Name: "compress_bytes_duration_ns",
 		Help: "how long it took to compress an array of bytes",
 	})
 
 	CompressBytesDurationMilliseconds = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name: "compress_bytes_duration_milliseconds",
+		Name: "compress_bytes_duration_ms",
 		Help: "how long it took to compress an array of bytes",
 	})
 
@@ -27,12 +27,12 @@ var (
 	})
 
 	UncompressBytesDurationNanoseconds = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name: "uncompress_bytes_duration_nanoseconds",
+		Name: "uncompress_bytes_duration_ns",
 		Help: "how long it took to uncompress an array of bytes",
 	})
 
 	UncompressBytesDurationMilliseconds = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name: "uncompress_bytes_duration_milliseconds",
+		Name: "uncompress_bytes_duration_ns",
 		Help: "how long it took to uncompress an array of bytes",
 	})
 
@@ -77,7 +77,7 @@ func compressBytes(rawBytes []byte) ([]byte, error) {
 	return compressedBytes.Bytes(), nil
 }
 
-//uncompresssBytes uncompresses a bytes array using flate
+// uncompresssBytes uncompresses a bytes array using flate
 func uncompressBytes(compressedBytes []byte) ([]byte, error) {
 	start := time.Now()
 	rawBuffer := bytes.NewBuffer(make([]byte, 0))

@@ -41,12 +41,12 @@ const (
 
 var (
 	EngineOperationDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine/operation_duration_nanoseconds",
+		Name: "engine/operation_duration_ns",
 		Help: "how long it takes to perform an engine operation in nanoseconds",
 	}, []string{"operation"})
 
 	EngineOperationDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine/operation_duration_milliseconds",
+		Name: "engine/operation_duration_ms",
 		Help: "how long it takes to perform an engine operation in milliseconds",
 	}, []string{"operation"})
 
@@ -999,7 +999,7 @@ func (engine *Engine) recover() error {
 	return nil
 }
 
-//NewEngine creates a new engine
+// NewEngine creates a new engine
 func NewEngine(config *EngineConfig) (*Engine, error) {
 	setDataPath(config.DataPath)
 

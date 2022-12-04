@@ -144,7 +144,7 @@ func (kv *KvHttpServer) StartServer() error {
 	logrus.Infof("using engine config %#v", kv.config.EngineConfig)
 
 	logrus.Infof("starting kv http server on port %d", kv.config.Port)
-	return kv.server.Listen(fmt.Sprintf(":%d", kv.config.Port)) //TODO: make port configurable
+	return kv.server.Listen(fmt.Sprintf(":%d", kv.config.Port))
 }
 
 func (kv *KvHttpServer) startMetricsServer() error {
