@@ -30,6 +30,12 @@ var (
 	})
 )
 
+func init() {
+	prometheus.Register(SegmentMetadataListOperationDurationMilliseconds)
+	prometheus.Register(SegmentMetadataListOperationDurationNanoseconds)
+	prometheus.Register(SegmentMetadataListSize)
+}
+
 type SegmentMetadata struct {
 	segmentID string // id of data segment
 	createdAt int64  // timestamp of when metadata was created

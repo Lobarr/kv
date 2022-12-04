@@ -25,42 +25,42 @@ const (
 
 var (
 	DataSegmentOperationDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "data_segment/operation_duration_ns",
+		Name: "data_segment_operation_duration_ns",
 		Help: "how long it takes to perform a data segment operation in nanoseconds",
 	}, []string{"segment_id", "operation"})
 
 	DataSegmentOperationDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "data_segment/operation_duration_ms",
+		Name: "data_segment_operation_duration_ms",
 		Help: "how long it takes to perform a data segment operation in milliseconds",
 	}, []string{"segment_id", "operation"})
 
 	DataSegmentFileSizes = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name: "data_segment/file_sizes",
+		Name: "data_segment_file_sizes",
 		Help: "size of data segment files in bytes",
 	})
 
 	DataSegmentLogEntryKeySizes = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name: "data_segment/log_entry/key_sizes",
+		Name: "data_segment_log_entry_key_sizes",
 		Help: "size of data segment keys in bytes",
 	})
 
 	DataSegmentLogEntryValueSizes = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name: "data_segment/log_entry/value_sizes",
+		Name: "data_segment_log_entry_value_sizes",
 		Help: "size of data segment values in bytes",
 	})
 
 	DataSegmentLogEntryCount = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "data_segment/log_entry_count",
+		Name: "data_segment_log_entry_count",
 		Help: "number of log entries in a data segment",
 	}, []string{"segment_id"})
 
 	DataSegmentLogEntrySizes = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "data_segment/log_entry_sizes",
+		Name: "data_segment_log_entry_sizes",
 		Help: "size of log entries in a data segment",
 	}, []string{"segment_id"})
 
 	DataSegmentCompressedLogEntrySizes = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "data_segment/compressed_log_entry_sizes",
+		Name: "data_segment_compressed_log_entry_sizes",
 		Help: "size of log entries in a data segment",
 	}, []string{"segment_id"})
 )

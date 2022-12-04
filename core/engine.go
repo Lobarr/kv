@@ -41,84 +41,103 @@ const (
 
 var (
 	EngineOperationDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine/operation_duration_ns",
+		Name: "engine_operation_duration_ns",
 		Help: "how long it takes to perform an engine operation in nanoseconds",
 	}, []string{"operation"})
 
 	EngineOperationDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine/operation_duration_ms",
+		Name: "engine_operation_duration_ms",
 		Help: "how long it takes to perform an engine operation in milliseconds",
 	}, []string{"operation"})
 
 	EngineSnapshotLogEntrySizes = prometheus.NewHistogram(prometheus.HistogramOpts{
-		Name: "engine/snapshot/log_entry_sizes",
+		Name: "engine_snapshot_log_entry_sizes",
 		Help: "size of snapshot entries in bytes",
 	})
 
 	EngineCompressedSnapshotLogEntrySizes = prometheus.NewHistogram(prometheus.HistogramOpts{
-		Name: "engine/snapshot/compressed_log_entry_sizes",
+		Name: "engine_snapshot_compressed_log_entry_sizes",
 		Help: "size of compressed snapshot entries in bytes",
 	})
 
 	EngineCacheHits = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "engine/query/cache_hit_count",
+		Name: "engine_query_cache_hit_count",
 		Help: "number of hits on the cache",
 	})
 
 	EngineDiskHits = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "engine/query/disk_hit_count",
+		Name: "engine_query_disk_hit_count",
 		Help: "number of hits on the disk",
 	})
 
 	EngineDeletedKeysCount = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "engine/deleted_keys_count",
+		Name: "engine_deleted_keys_count",
 		Help: "nubmer of deleted keys",
 	})
 
 	EngineKeysCount = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "engine/keys_count",
+		Name: "engine_keys_count",
 		Help: "nubmer of keys in the storage engine",
 	})
 
 	EngineLogEntryIndexCount = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "engine/log_entry_index_count",
+		Name: "engine_log_entry_index_count",
 		Help: "number of log entry indexes",
 	})
 
 	EngineSearchedDataSegments = prometheus.NewHistogram(prometheus.HistogramOpts{
-		Name: "engine/query/searched_data_segments",
+		Name: "engine_query_searched_data_segments",
 		Help: "number of data segments searched",
 	})
 
 	EngineQueryCount = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "engine/query_count",
+		Name: "engine_query_count",
 		Help: "number of queries on the storage engine",
 	}, []string{"status", "found", "deleted"})
 
 	EngineFilesToCompact = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "engine/files_to_compact",
+		Name: "engine_files_to_compact",
 		Help: "number of files to compact",
 	}, []string{"operation"})
 
 	EngineSegmentsToDelete = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "engine/segments_to_delete",
+		Name: "engine_segments_to_delete",
 		Help: "number of segments to delete",
 	})
 
 	EngineActiveWorkers = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "engine/active_workers",
+		Name: "engine_active_workers",
 	}, []string{"operation"})
 
 	EngineSnapshotsCompactionCount = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "engine/snapshot/compaction_count",
+		Name: "engine_snapshot_compaction_count",
 		Help: "how many times the snapshots compaction job has run",
 	})
 
 	EngineSegmentsCompactionCount = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "engine/data_segment/compaction_count",
+		Name: "engine_data_segment_compaction_count",
 		Help: "how many times the segments compaction job has run",
 	})
 )
+
+func init() {
+	prometheus.Register(EngineOperationDurationMilliseconds)
+	prometheus.Register(EngineOperationDurationNanoseconds)
+	prometheus.Register(EngineSnapshotLogEntrySizes)
+	prometheus.Register(EngineCompressedSnapshotLogEntrySizes)
+	prometheus.Register(EngineCacheHits)
+	prometheus.Register(EngineDiskHits)
+	prometheus.Register(EngineDeletedKeysCount)
+	prometheus.Register(EngineKeysCount)
+	prometheus.Register(EngineLogEntryIndexCount)
+	prometheus.Register(EngineSearchedDataSegments)
+	prometheus.Register(EngineQueryCount)
+	prometheus.Register(EngineFilesToCompact)
+	prometheus.Register(EngineSegmentsToDelete)
+	prometheus.Register(EngineActiveWorkers)
+	prometheus.Register(EngineSnapshotsCompactionCount)
+	prometheus.Register(EngineSegmentsCompactionCount)
+}
 
 // ErrKeyNotFound occurs when a key is not found in the data store
 var ErrKeyNotFound = errors.New("key not found")

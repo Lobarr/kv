@@ -32,7 +32,7 @@ var (
 	})
 
 	UncompressBytesDurationMilliseconds = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name: "uncompress_bytes_duration_ns",
+		Name: "uncompress_bytes_duration_ms",
 		Help: "how long it took to uncompress an array of bytes",
 	})
 
