@@ -25,45 +25,56 @@ const (
 
 var (
 	DataSegmentOperationDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "data_segment_operation_duration_nanoseconds",
-		Help: "how long it takes to perform a data segment operation",
+		Name: "data_segment/operation_duration_nanoseconds",
+		Help: "how long it takes to perform a data segment operation in nanoseconds",
 	}, []string{"segment_id", "operation"})
 
 	DataSegmentOperationDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "data_segment_operation_duration_milliseconds",
-		Help: "how long it takes to perform a data segment operation",
+		Name: "data_segment/operation_duration_milliseconds",
+		Help: "how long it takes to perform a data segment operation in milliseconds",
 	}, []string{"segment_id", "operation"})
 
 	DataSegmentFileSizes = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name: "data_segment_file_sizes",
+		Name: "data_segment/file_sizes",
 		Help: "size of data segment files in bytes",
 	})
 
 	DataSegmentLogEntryKeySizes = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name: "data_segment_log_entry_key_sizes",
+		Name: "data_segment/log_entry/key_sizes",
 		Help: "size of data segment keys in bytes",
 	})
 
 	DataSegmentLogEntryValueSizes = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name: "data_segment_log_entry_value_sizes",
+		Name: "data_segment/log_entry/value_sizes",
 		Help: "size of data segment values in bytes",
 	})
 
 	DataSegmentLogEntryCount = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "data_segment_log_entry_count",
+		Name: "data_segment/log_entry_count",
 		Help: "number of log entries in a data segment",
 	}, []string{"segment_id"})
 
-	DataSegmentRawLogEntrySizes = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "data_segment_raw_log_entry_sizes",
+	DataSegmentLogEntrySizes = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "data_segment/log_entry_sizes",
 		Help: "size of log entries in a data segment",
 	}, []string{"segment_id"})
 
 	DataSegmentCompressedLogEntrySizes = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "data_segment_compressed_log_entry_sizes",
+		Name: "data_segment/compressed_log_entry_sizes",
 		Help: "size of log entries in a data segment",
 	}, []string{"segment_id"})
 )
+
+func init() {
+	prometheus.Register(DataSegmentOperationDurationNanoseconds)
+	prometheus.Register(DataSegmentOperationDurationMilliseconds)
+	prometheus.Register(DataSegmentFileSizes)
+	prometheus.Register(DataSegmentLogEntryKeySizes)
+	prometheus.Register(DataSegmentLogEntryValueSizes)
+	prometheus.Register(DataSegmentLogEntryCount)
+	prometheus.Register(DataSegmentLogEntrySizes)
+	prometheus.Register(DataSegmentCompressedLogEntrySizes)
+}
 
 //ErrClosedDataSegment occurs when an attempt to write to a closed data segment is made
 var ErrClosedDataSegment = errors.New("data segment closed")
@@ -103,7 +114,7 @@ func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 		DataSegmentOperationDurationMilliseconds.WithLabelValues(ds.id, AddLogEntryOperation).Observe(float64(time.Since(start).Milliseconds()))
 		DataSegmentLogEntryKeySizes.Observe(float64(len(logEntry.Key)))
 		DataSegmentLogEntryValueSizes.Observe(float64(len(logEntry.Value)))
-		DataSegmentRawLogEntrySizes.WithLabelValues(ds.id).Observe(float64(len(logEntryBytes)))
+		DataSegmentLogEntrySizes.WithLabelValues(ds.id).Observe(float64(len(logEntryBytes)))
 		DataSegmentCompressedLogEntrySizes.WithLabelValues(ds.id).Observe(float64(len(compressedLogEntryBytes)))
 	}()
 
@@ -166,7 +177,7 @@ func (ds *dataSegment) getLogEntry(logEntryIndex *LogEntryIndex) (*LogEntry, err
 		DataSegmentOperationDurationMilliseconds.WithLabelValues(ds.id, GetLogEntryOperation).Observe(float64(time.Since(start).Milliseconds()))
 		DataSegmentLogEntryKeySizes.Observe(float64(len(logEntryIndex.Key)))
 		DataSegmentLogEntryValueSizes.Observe(float64(len(logEntry.Value)))
-		DataSegmentRawLogEntrySizes.WithLabelValues(ds.id).Observe(float64(logEntryIndex.EntrySize))
+		DataSegmentLogEntrySizes.WithLabelValues(ds.id).Observe(float64(logEntryIndex.EntrySize))
 		DataSegmentCompressedLogEntrySizes.WithLabelValues(ds.id).Observe(float64(logEntryIndex.CompressedEntrySize))
 	}()
 
@@ -195,16 +206,11 @@ func (ds *dataSegment) getLogEntry(logEntryIndex *LogEntryIndex) (*LogEntry, err
 
 // close closes the data segment
 func (ds *dataSegment) close() error {
-	var err error
 	start := time.Now()
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
 
 	defer func() {
-		if err != nil {
-			return
-		}
-
 		DataSegmentOperationDurationNanoseconds.WithLabelValues(ds.id, CloseDataSegmentOperation).Observe(float64(time.Since(start).Nanoseconds()))
 		DataSegmentOperationDurationMilliseconds.WithLabelValues(ds.id, CloseDataSegmentOperation).Observe(float64(time.Since(start).Milliseconds()))
 	}()

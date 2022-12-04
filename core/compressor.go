@@ -42,6 +42,15 @@ var (
 	})
 )
 
+func init() {
+	prometheus.Register(CompressBytesDurationNanoseconds)
+	prometheus.Register(CompressBytesDurationMilliseconds)
+	prometheus.Register(RawByteSizes)
+	prometheus.Register(UncompressBytesDurationNanoseconds)
+	prometheus.Register(UncompressBytesDurationMilliseconds)
+	prometheus.Register(CompressedByteSizes)
+}
+
 // compressBytes compresses an input byte array using flate
 func compressBytes(rawBytes []byte) ([]byte, error) {
 	start := time.Now()
