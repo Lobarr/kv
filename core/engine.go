@@ -118,116 +118,6 @@ var (
 		Name: "engine/data_segment/compaction_count",
 		Help: "how many times the segments compaction job has run",
 	})
-
-	EngineCaptureSnapshotDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_capture_snapshot_duration_nanoseconds",
-		Help: "how long it takes to capture a snapshot",
-	}, []string{"log_entry_indexes_length", "snapshot_entry_size", "compressed_snapshot_entry_size"})
-
-	EngineCaptureSnapshotDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_capture_snapshot_duration_milliseconds",
-		Help: "how long it takes to capture a snapshot",
-	}, []string{"log_entry_indexes_length", "snapshot_entry_size", "compressed_snapshot_entry_size"})
-
-	EngineLoadSnapshotDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_load_snapshot_duration_nanoseconds",
-		Help: "how long it takes to load a snapshot",
-	}, []string{"log_entry_indexes_length", "snapshot_entry_size", "compressed_snapshot_entry_size"})
-
-	EngineLoadSnapshotDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_load_snapshot_duration_nanoseconds",
-		Help: "how long it takes to load a snapshot",
-	}, []string{"log_entry_indexes_length", "snapshot_entry_size", "compressed_snapshot_entry_size"})
-
-	EngineRolloverSegmentDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_rollover_segment_duration_nanoseconds",
-		Help: "how long it takes to switch to a new data segment when current gets full",
-	}, []string{"segment_id", "segment_entries_count"})
-
-	EngineRolloverSegmentDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_rollover_segment_duration_milliseconds",
-		Help: "how long it takes to switch to a new data segment when current gets full",
-	}, []string{"segment_id", "segment_entries_count"})
-
-	EngineSetDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_set_duration_nanoseconds",
-		Help: "how long it takes to set a key value pair",
-	}, []string{"segment_id", "segment_entries_count", "key", "value_size"})
-
-	EngineSetDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_set_duration_milliseconds",
-		Help: "how long it takes to set a key value pair",
-	}, []string{"segment_id", "segment_entries_count", "key", "value_size"})
-
-	EngineLoadDataSegmentDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_load_data_segment_duration_nanoseconds",
-		Help: "how long it takes to load a data segment from disk",
-	}, []string{"segment_id", "segment_entries_count", "cache_hit"})
-
-	EngineLoadDataSegmentDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_load_data_segment_duration_milliseconds",
-		Help: "how long it takes to load a data segment from disk",
-	}, []string{"segment_id", "segment_size", "cache_hit"})
-
-	EngineFindLogEntryByKeyDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_find_log_entry_by_key_duration_nanoseconds",
-		Help: "how long it took to find a log entry belonging to a key",
-	}, []string{"key", "found", "searched_segments_count"})
-
-	EngineFindLogEntryByKeyDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_find_log_entry_by_key_duration_milliseconds",
-		Help: "how long it took to find a log entry belonging to a key",
-	}, []string{"key", "found", "searched_segments_count"})
-
-	EngineGetDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_get_duration_nanoseconds",
-		Help: "how long it takes to get a key's value",
-	}, []string{"key", "found", "deleted"})
-
-	EngineGetDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_get_duration_milliseconds",
-		Help: "how long it takes to get a key's value",
-	}, []string{"key", "found", "deleted"})
-
-	EngineDeleteDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_delete_duration_nanoseconds",
-		Help: "how long it takes to delete a key's value",
-	}, []string{"key", "found"})
-
-	EngineDeleteDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_delete_duration_milliseconds",
-		Help: "how long it takes to delete a key's value",
-	}, []string{"key", "found"})
-
-	EngineCloseDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_close_duration_nanoseconds",
-		Help: "how long it takes to close the engine",
-	}, []string{"segment_id", "segment_entries_count", "historical_segment_ids_length"})
-
-	EngineCloseDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_close_duration_milliseconds",
-		Help: "how long it takes to close the engine",
-	}, []string{"segment_id", "segment_entries_count", "historical_segment_ids_length"})
-
-	EngineCompactSegmentsDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_compact_segments_duration_nanoseconds",
-		Help: "how long it takes to run a segment compaction job",
-	}, []string{"files_to_compact", "segments_to_delete", "workers_count", "segments_max_size"})
-
-	EngineCompactSegmentsDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_compact_segments_duration_nanoseconds",
-		Help: "how long it takes to run a segment compaction job",
-	}, []string{"files_to_compact", "segments_to_delete", "workers_count", "segments_max_size"})
-
-	EngineCompactSnapshotsDurationNanoseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_compact_segments_duration_nanoseconds",
-		Help: "how long it takes to run a snapshot compaction job",
-	}, []string{"files_to_compact", "deleted_count"})
-
-	EngineCompactSnapshotsDurationMilliseconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "engine_compact_segments_duration_nanoseconds",
-		Help: "how long it takes to run a snapshot compaction job",
-	}, []string{"files_to_compact", "deleted_count"})
 )
 
 // ErrKeyNotFound occurs when a key is not found in the data store
@@ -853,14 +743,14 @@ func (engine *Engine) compactSegments() error {
 	resultsGroup.SetLimit(2)
 
 	// collect results from worker routines
-	resultsGroup.Do(func() error {
+	resultsGroup.Go(func() error {
 		for compactedSegmentEntry := range compactedSegmentEntriesChan {
 			compactedSegmentEntries = append(compactedSegmentEntries, compactedSegmentEntry)
 		}
 		return nil
 	})
 
-	resultsGroup.Do(func() error {
+	resultsGroup.Go(func() error {
 		defer close(compactedSegmentEntriesChan)
 		workerGroup, _ := errgroup.WithContext(resultsGroupCtx)
 
@@ -873,7 +763,7 @@ func (engine *Engine) compactSegments() error {
 
 		// concurrently compact segments
 		for _, file := range files {
-			workerGroup.Do(func() error {
+			workerGroup.Go(func() error {
 				EngineActiveWorkers.WithLabelValues(CompactSegmentsOperation).Inc()
 				defer EngineActiveWorkers.WithLabelValues(CompactSegmentsOperation).Dec()
 

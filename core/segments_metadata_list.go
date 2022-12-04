@@ -60,7 +60,7 @@ func (s SegmentMetadataList) Swap(x, y int) {
 	s.segmentIDByIndex[s.segmentMetadataHeap[y].segmentID] = y
 }
 
-func (s *SegmentMetadataList) Push(ctx interface{}) {
+func (s *SegmentMetadataList) Push(ctx any) {
 	index := len(s.segmentMetadataHeap)
 	segmentMetadata := ctx.(*SegmentMetadata)
 	segmentMetadata.index = index
@@ -68,7 +68,7 @@ func (s *SegmentMetadataList) Push(ctx interface{}) {
 	s.segmentIDByIndex[segmentMetadata.segmentID] = segmentMetadata.index
 }
 
-func (s *SegmentMetadataList) Pop() interface{} {
+func (s *SegmentMetadataList) Pop() any {
 	prevsegmentMetadataHeap := s.segmentMetadataHeap
 	n := len(prevsegmentMetadataHeap)
 	segmentMetadata := prevsegmentMetadataHeap[n-1]
