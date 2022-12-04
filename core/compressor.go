@@ -3,7 +3,6 @@ package core
 import (
 	"bytes"
 	"compress/flate"
-	"fmt"
 	"io"
 	"time"
 
@@ -12,25 +11,35 @@ import (
 )
 
 var (
-	CompressBytesDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	CompressBytesDurationNanoseconds = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name: "compress_bytes_duration_nanoseconds",
 		Help: "how long it took to compress an array of bytes",
-	}, []string{"raw_bytes_size", "compressed_bytes_size"})
+	})
 
-	CompressBytesDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	CompressBytesDurationMilliseconds = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name: "compress_bytes_duration_milliseconds",
 		Help: "how long it took to compress an array of bytes",
-	}, []string{"raw_bytes_size", "compressed_bytes_size"})
+	})
 
-	UncompressBytesDurationNanoseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	RawByteSizes = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name: "raw_byte_sizes",
+		Help: "size of payloads being compressed",
+	})
+
+	UncompressBytesDurationNanoseconds = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name: "uncompress_bytes_duration_nanoseconds",
 		Help: "how long it took to uncompress an array of bytes",
-	}, []string{"raw_bytes_size", "compressed_bytes_size"})
+	})
 
-	UncompressBytesDurationMilliseconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	UncompressBytesDurationMilliseconds = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name: "uncompress_bytes_duration_milliseconds",
 		Help: "how long it took to uncompress an array of bytes",
-	}, []string{"raw_bytes_size", "compressed_bytes_size"})
+	})
+
+	CompressedByteSizes = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name: "compressed_byte_sizes",
+		Help: "size of payloads after compression",
+	})
 )
 
 // compressBytes compresses an input byte array using flate
@@ -43,8 +52,7 @@ func compressBytes(rawBytes []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	_, err = compressor.Write(rawBytes)
-	if err != nil {
+	if _, err = compressor.Write(rawBytes); err != nil {
 		return nil, err
 	}
 
@@ -52,15 +60,10 @@ func compressBytes(rawBytes []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	CompressBytesDurationNanoseconds.WithLabelValues(
-		fmt.Sprint(len(rawBytes)),
-		fmt.Sprint(compressedBytes.Len()),
-	).Observe(float64(time.Since(start).Nanoseconds()))
-
-	CompressBytesDurationMilliseconds.WithLabelValues(
-		fmt.Sprint(len(rawBytes)),
-		fmt.Sprint(compressedBytes.Len()),
-	).Observe(float64(time.Since(start).Milliseconds()))
+	RawByteSizes.Observe(float64(len(rawBytes)))
+	CompressedByteSizes.Observe(float64(compressedBytes.Len()))
+	CompressBytesDurationNanoseconds.Observe(float64(time.Since(start).Nanoseconds()))
+	CompressBytesDurationMilliseconds.Observe(float64(time.Since(start).Milliseconds()))
 
 	return compressedBytes.Bytes(), nil
 }
@@ -80,18 +83,10 @@ func uncompressBytes(compressedBytes []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	UncompressBytesDurationNanoseconds.WithLabelValues(
-		fmt.Sprint(len(rawBuffer.Bytes())),
-		fmt.Sprint(len(compressedBytes)),
-	).Observe(
-		float64(time.Since(start).Nanoseconds()),
-	)
-	UncompressBytesDurationMilliseconds.WithLabelValues(
-		fmt.Sprint(len(rawBuffer.Bytes())),
-		fmt.Sprint(len(compressedBytes)),
-	).Observe(
-		float64(time.Since(start).Milliseconds()),
-	)
+	RawByteSizes.Observe(float64(rawBuffer.Len()))
+	CompressedByteSizes.Observe(float64(len(compressedBytes)))
+	CompressBytesDurationNanoseconds.Observe(float64(time.Since(start).Nanoseconds()))
+	CompressBytesDurationMilliseconds.Observe(float64(time.Since(start).Milliseconds()))
 
 	return rawBuffer.Bytes(), nil
 }

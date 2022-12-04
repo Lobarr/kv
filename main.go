@@ -12,6 +12,8 @@ func init() {
 	prometheus.Register(core.CompressBytesDurationMilliseconds)
 	prometheus.Register(core.UncompressBytesDurationNanoseconds)
 	prometheus.Register(core.UncompressBytesDurationMilliseconds)
+	prometheus.Register(core.RawByteSizes)
+	prometheus.Register(core.CompressedByteSizes)
 	prometheus.Register(core.AddLogEntryDurationNanoseconds)
 	prometheus.Register(core.AddLogEntryDurationMilliseconds)
 	prometheus.Register(core.GetLogEntryDurationNanoseconds)
