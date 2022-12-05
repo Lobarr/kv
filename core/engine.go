@@ -416,12 +416,17 @@ func (engine *Engine) findLogEntryByKey(key string) (*LogEntry, error) {
 			engine.segmentMutex.Lock()
 			segment = engine.segment
 			engine.segmentMutex.Unlock()
+			EngineCacheHits.Inc()
 		}
 
 		searchedSegmentsCount := (len(segments) - cursor) + 1
 		EngineSearchedDataSegments.Observe(float64(searchedSegmentsCount))
 
-		return segment.getLogEntry(&logEntryIndex)
+		engine.segmentMutex.Lock()
+		logEntry, err := segment.getLogEntry(&logEntryIndex)
+		engine.segmentMutex.Unlock()
+
+		return logEntry, err
 	}
 
 	return nil, ErrKeyNotFound

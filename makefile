@@ -14,7 +14,7 @@ benchmark:
 	drill -b kv_benchmark.yml --stats
 
 start-http-server:
-	ENV=dev go run main.go
+	ENV=dev go run main.go -race
 
 build:
 	go build -o ./bin/kv_http_server

@@ -1,5 +1,5 @@
 global:
-  scrape_interval: 150ms
+  scrape_interval: 1s
 
 scrape_configs:
   - job_name: kv
