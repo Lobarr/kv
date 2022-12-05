@@ -69,7 +69,7 @@ func makeEngine(t testing.TB) (*core.Engine, error) {
 		SegmentMaxSize:             10000,
 		SnapshotInterval:           10 * time.Second,
 		TolerableSnapshotFailCount: 5,
-		CacheSize:                  100,
+		CacheSize:                  1000,
 		CompactorInterval:          10 * time.Second,
 		CompactorWorkerCount:       10,
 		SnapshotTTLDuration:        10 * time.Second,
