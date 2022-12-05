@@ -1,6 +1,7 @@
 package core_test
 
 import (
+	"context"
 	"fmt"
 	"kv/core"
 	"math/rand"
@@ -12,6 +13,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/schollz/progressbar/v3"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 func init() {
@@ -64,8 +66,8 @@ func benchmarkGet(valueSize int, engine *core.Engine, b *testing.B) {
 
 func makeEngine(t testing.TB) (*core.Engine, error) {
 	return core.NewEngine(&core.EngineConfig{
-		SegmentMaxSize:             1000,
-		SnapshotInterval:           5 * time.Second,
+		SegmentMaxSize:             10000,
+		SnapshotInterval:           10 * time.Second,
 		TolerableSnapshotFailCount: 5,
 		CacheSize:                  100,
 		CompactorInterval:          10 * time.Second,
@@ -133,10 +135,10 @@ func BenchmarkGet(b *testing.B) {
 	})
 }
 
-const ReadsWorkersCount = 100
-const ReadsJobsCount = 15000
-const WritesWorkersCount = 10
-const WritesJobsCount = 5000
+const ReadsWorkersCount = 1000
+const ReadsJobsCount = 50
+const WritesWorkersCount = 100
+const WritesJobsCount = 25
 
 func TestConcurrentWrites(t *testing.T) {
 	start := time.Now()
@@ -150,20 +152,22 @@ func TestConcurrentWrites(t *testing.T) {
 
 	defer engine.Close()
 
-	wg := new(sync.WaitGroup)
+	writesGroup, _ := errgroup.WithContext(context.Background())
+	writesGroup.SetLimit(WritesWorkersCount)
+
 	keysLengthWritten := 0
 	valuesLengthWritten := 0
 
 	for z := 0; z < WritesWorkersCount; z++ {
-		go func(wg *sync.WaitGroup, id int) {
-			for i := 0; i < WritesJobsCount; i++ {
-				key := randomStringBetween(600, 800)
-				value := randomStringBetween(1500, 3000)
+		for i := 0; i < WritesJobsCount; i++ {
+			key := randomStringBetween(600, 800)
+			value := randomStringBetween(1500, 3000)
 
-				keysLengthWritten += len(key)
-				valuesLengthWritten += len(value)
+			keysLengthWritten += len(key)
+			valuesLengthWritten += len(value)
 
-				// logrus.Printf("concurrent writes worker %d - job %d - key size %d - value size %d", id, i, len(key), len(value))
+			writesGroup.Go(func() error {
+				// logrus.Printf("concurrent writes job %d - key size %d - value size %d", i, len(key), len(value))
 
 				if err := engine.Set(key, value); err != nil {
 					panic(err)
@@ -172,13 +176,12 @@ func TestConcurrentWrites(t *testing.T) {
 				if os.Getenv("CI") != "true" {
 					bar.Add(1)
 				}
-			}
-			wg.Done()
-		}(wg, z)
-		wg.Add(1)
+				return nil
+			})
+		}
 	}
 
-	wg.Wait()
+	writesGroup.Wait()
 
 	duration := time.Since(start).Seconds()
 	rate := float64(jobCount) / duration

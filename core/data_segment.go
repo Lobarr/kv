@@ -85,59 +85,62 @@ var LogEntrySeperator = []byte("\n")
 // dataSegment represents a portion of the data stored by the data store that
 // is bounded by an upper limit of number of entries
 type dataSegment struct {
-	entriesCount int           // number of entries stored in the segment
-	file         *os.File      // open file descriptor of segment
-	fileName     string        // filename of segment on disk
-	id           string        // unique identifier of the segment
-	isClosed     bool          // indicator of state of data segment (open or closed)
-	mu           *sync.RWMutex // mutex used to synchronize access and avoid race conditions
-	offset       int64         // current latest offset to write new log entries
-	logger       log.FieldLogger
+	entriesCount      int           // number of entries stored in the segment
+	entriesCountMutex *sync.RWMutex // mutex that synchronizes entriesCount
+	file              *os.File      // open file descriptor of segment
+	fileMutex         *sync.RWMutex // mutex that synchronizes file
+	fileName          string        // filename of segment on disk
+	id                string        // unique identifier of the segment
+	idMutex           *sync.RWMutex // mutex that synchronizes id
+	isClosed          bool          // indicator of state of data segment (open or closed)
+	isClosedMutex     *sync.RWMutex // mutex that synchronizes isClosed
+	offset            int64         // current latest offset to write new log entries
+	offsetMutex       *sync.RWMutex //mutex that synchronizes offset
+	logger            log.FieldLogger
 }
 
 // addLogEntry adds a log entry to the data segment
 func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
-	var logEntryBytes []byte
-	var compressedLogEntryBytes []byte
-	var err error
 	start := time.Now()
 
-	ds.logger.Debugf("adding log entry %s to segment %s", logEntry.Key, ds.id)
+	ds.idMutex.RLock()
+	segmentID := ds.id
+	ds.idMutex.RUnlock()
+
+	ds.logger.Debugf("adding log entry %s to segment %s", logEntry.Key, segmentID)
 
 	defer func() {
-		if err != nil {
-			return
-		}
-
-		DataSegmentLogEntryCount.WithLabelValues(ds.id).Inc()
-		DataSegmentOperationDurationNanoseconds.WithLabelValues(ds.id, AddLogEntryOperation).Observe(float64(time.Since(start).Nanoseconds()))
-		DataSegmentOperationDurationMilliseconds.WithLabelValues(ds.id, AddLogEntryOperation).Observe(float64(time.Since(start).Milliseconds()))
-		DataSegmentLogEntryKeySizes.Observe(float64(len(logEntry.Key)))
-		DataSegmentLogEntryValueSizes.Observe(float64(len(logEntry.Value)))
-		DataSegmentLogEntrySizes.WithLabelValues(ds.id).Observe(float64(len(logEntryBytes)))
-		DataSegmentCompressedLogEntrySizes.WithLabelValues(ds.id).Observe(float64(len(compressedLogEntryBytes)))
+		DataSegmentOperationDurationNanoseconds.WithLabelValues(
+			segmentID, AddLogEntryOperation).Observe(float64(time.Since(start).Nanoseconds()))
+		DataSegmentOperationDurationMilliseconds.WithLabelValues(
+			segmentID, AddLogEntryOperation).Observe(float64(time.Since(start).Milliseconds()))
 	}()
 
-	if ds.isClosed {
+	ds.isClosedMutex.RLock()
+	isClosed := ds.isClosed
+	ds.isClosedMutex.RUnlock()
+
+	if isClosed {
 		return nil, ErrClosedDataSegment
 	}
 
-	logEntryBytes, err = logEntry.Encode()
+	logEntryBytes, err := logEntry.Encode()
 	if err != nil {
 		return nil, err
 	}
 
-	compressedLogEntryBytes, err = compressBytes(logEntryBytes)
+	compressedLogEntryBytes, err := compressBytes(logEntryBytes)
 	if err != nil {
 		return nil, err
 	}
 
-	ds.logger.Debugf("writing compressed bytes of size %d for log entry %s to segment %s", len(compressedLogEntryBytes), logEntry.Key, ds.id)
+	ds.logger.Debugf("writing compressed bytes of size %d for log entry %s to segment %s",
+		len(compressedLogEntryBytes), logEntry.Key, segmentID)
 
-	ds.mu.Lock()
-	defer ds.mu.Unlock()
-
+	ds.offsetMutex.RLock()
 	startOffset := ds.offset
+	ds.offsetMutex.RUnlock()
+
 	logEntryBytesWithSeperator := bytes.Join([][]byte{compressedLogEntryBytes, make([]byte, 0)}, LogEntrySeperator)
 	bytesWrittenSize, err := ds.file.WriteAt(logEntryBytesWithSeperator, startOffset)
 
@@ -145,10 +148,24 @@ func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 		return nil, err
 	}
 
+	ds.offsetMutex.Lock()
 	ds.offset += int64(bytesWrittenSize)
+	ds.offsetMutex.Unlock()
+	ds.entriesCountMutex.Lock()
 	ds.entriesCount++
+	ds.entriesCountMutex.Unlock()
 
+	ds.offsetMutex.RLock()
+	ds.entriesCountMutex.RLock()
 	ds.logger.Debugf("new data segment state : offset = %d entriesCount = %d", ds.offset, ds.entriesCount)
+	ds.offsetMutex.RUnlock()
+	ds.entriesCountMutex.RUnlock()
+
+	DataSegmentLogEntryKeySizes.Observe(float64(len(logEntry.Key)))
+	DataSegmentLogEntryValueSizes.Observe(float64(len(logEntry.Value)))
+	DataSegmentLogEntrySizes.WithLabelValues(segmentID).Observe(float64(len(logEntryBytes)))
+	DataSegmentLogEntryCount.WithLabelValues(segmentID).Inc()
+	DataSegmentCompressedLogEntrySizes.WithLabelValues(segmentID).Observe(float64(len(compressedLogEntryBytes)))
 
 	return &LogEntryIndex{
 		Key:                 logEntry.Key,
@@ -161,45 +178,42 @@ func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 
 // getLogEntry retrives the log entry from the data segment
 func (ds *dataSegment) getLogEntry(logEntryIndex *LogEntryIndex) (*LogEntry, error) {
-	var logEntry *LogEntry
-	var logEntryBytes []byte
-	var err error
 	start := time.Now()
-	ds.mu.RLock()
-	defer ds.mu.RUnlock()
+	ds.idMutex.RLock()
+	segmentID := ds.id
+	ds.idMutex.RUnlock()
 
 	defer func() {
-		if err != nil {
-			return
-		}
-
-		DataSegmentOperationDurationNanoseconds.WithLabelValues(ds.id, GetLogEntryOperation).Observe(float64(time.Since(start).Nanoseconds()))
-		DataSegmentOperationDurationMilliseconds.WithLabelValues(ds.id, GetLogEntryOperation).Observe(float64(time.Since(start).Milliseconds()))
-		DataSegmentLogEntryKeySizes.Observe(float64(len(logEntryIndex.Key)))
-		DataSegmentLogEntryValueSizes.Observe(float64(len(logEntry.Value)))
-		DataSegmentLogEntrySizes.WithLabelValues(ds.id).Observe(float64(logEntryIndex.EntrySize))
-		DataSegmentCompressedLogEntrySizes.WithLabelValues(ds.id).Observe(float64(logEntryIndex.CompressedEntrySize))
+		DataSegmentOperationDurationNanoseconds.WithLabelValues(
+			segmentID, GetLogEntryOperation).Observe(float64(time.Since(start).Nanoseconds()))
+		DataSegmentOperationDurationMilliseconds.WithLabelValues(
+			segmentID, GetLogEntryOperation).Observe(float64(time.Since(start).Milliseconds()))
 	}()
 
 	ds.logger.Debugf("retrieving log entry for key %s", logEntryIndex.Key)
 
 	compressedLogEntryBytes := make([]byte, logEntryIndex.CompressedEntrySize)
-	_, err = ds.file.ReadAt(compressedLogEntryBytes, logEntryIndex.OffSet)
+	_, err := ds.file.ReadAt(compressedLogEntryBytes, logEntryIndex.OffSet)
 	if err != nil {
 		return nil, err
 	}
 
-	logEntryBytes, err = uncompressBytes(compressedLogEntryBytes)
+	logEntryBytes, err := uncompressBytes(compressedLogEntryBytes)
 	if err != nil {
 		return nil, err
 	}
 
-	logEntry = &LogEntry{}
+	logEntry := &LogEntry{}
 	err = logEntry.Decode(logEntryBytes)
 
 	if err != nil {
 		return nil, err
 	}
+
+	DataSegmentLogEntryKeySizes.Observe(float64(len(logEntryIndex.Key)))
+	DataSegmentLogEntryValueSizes.Observe(float64(len(logEntry.Value)))
+	DataSegmentLogEntrySizes.WithLabelValues(segmentID).Observe(float64(logEntryIndex.EntrySize))
+	DataSegmentCompressedLogEntrySizes.WithLabelValues(segmentID).Observe(float64(logEntryIndex.CompressedEntrySize))
 
 	return logEntry, nil
 }
@@ -207,27 +221,43 @@ func (ds *dataSegment) getLogEntry(logEntryIndex *LogEntryIndex) (*LogEntry, err
 // close closes the data segment
 func (ds *dataSegment) close() error {
 	start := time.Now()
-	ds.mu.Lock()
-	defer ds.mu.Unlock()
+	ds.idMutex.RLock()
+	segmentID := ds.id
+	ds.idMutex.RUnlock()
 
 	defer func() {
-		DataSegmentOperationDurationNanoseconds.WithLabelValues(ds.id, CloseDataSegmentOperation).Observe(float64(time.Since(start).Nanoseconds()))
-		DataSegmentOperationDurationMilliseconds.WithLabelValues(ds.id, CloseDataSegmentOperation).Observe(float64(time.Since(start).Milliseconds()))
+		DataSegmentOperationDurationNanoseconds.WithLabelValues(
+			segmentID, CloseDataSegmentOperation).Observe(float64(time.Since(start).Nanoseconds()))
+		DataSegmentOperationDurationMilliseconds.WithLabelValues(
+			segmentID, CloseDataSegmentOperation).Observe(float64(time.Since(start).Milliseconds()))
 	}()
 
-	if !ds.isClosed {
+	ds.isClosedMutex.RLock()
+	isClosed := ds.isClosed
+	ds.isClosedMutex.RUnlock()
+
+	if !isClosed {
 		ds.logger.Debug("closing data segment")
 
+		ds.fileMutex.RLock()
 		fileStat, err := ds.file.Stat()
+		ds.fileMutex.RUnlock()
+
 		if err != nil {
 			return err
 		}
 
-		if err := ds.file.Close(); err != nil {
+		ds.fileMutex.Lock()
+		err = ds.file.Close()
+		ds.fileMutex.Unlock()
+
+		if err != nil {
 			return err
 		}
 
+		ds.isClosedMutex.Lock()
 		ds.isClosed = true
+		ds.isClosedMutex.Unlock()
 
 		DataSegmentFileSizes.Observe(float64(fileStat.Size()))
 	}
@@ -253,21 +283,27 @@ func newDataSegment() (*dataSegment, error) {
 	}
 
 	segment := &dataSegment{
-		entriesCount: 0,
-		file:         file,
-		fileName:     fileName,
-		id:           id,
-		isClosed:     false,
-		offset:       0,
-		mu:           new(sync.RWMutex),
+		entriesCount:      0,
+		entriesCountMutex: new(sync.RWMutex),
+		file:              file,
+		fileMutex:         new(sync.RWMutex),
+		fileName:          fileName,
+		id:                id,
+		idMutex:           new(sync.RWMutex),
+		isClosed:          false,
+		isClosedMutex:     new(sync.RWMutex),
+		offset:            0,
+		offsetMutex:       new(sync.RWMutex),
 		logger: log.WithFields(log.Fields{
 			"fileName": fileName,
 			"id":       id,
 		}),
 	}
 
-	DataSegmentOperationDurationMilliseconds.WithLabelValues(segment.id, CreateDataSegmentOperation).Observe(float64(time.Since(start).Milliseconds()))
-	DataSegmentOperationDurationNanoseconds.WithLabelValues(segment.id, CreateDataSegmentOperation).Observe(float64(time.Since(start).Nanoseconds()))
+	DataSegmentOperationDurationMilliseconds.WithLabelValues(
+		segment.id, CreateDataSegmentOperation).Observe(float64(time.Since(start).Milliseconds()))
+	DataSegmentOperationDurationNanoseconds.WithLabelValues(
+		segment.id, CreateDataSegmentOperation).Observe(float64(time.Since(start).Nanoseconds()))
 
 	return segment, nil
 }
@@ -283,21 +319,27 @@ func loadDataSegment(id string) (*dataSegment, error) {
 	}
 
 	segment := &dataSegment{
-		entriesCount: -1,
-		file:         file,
-		fileName:     fileName,
-		id:           id,
-		isClosed:     false,
-		offset:       -1,
-		mu:           new(sync.RWMutex),
+		entriesCount:      -1,
+		entriesCountMutex: new(sync.RWMutex),
+		file:              file,
+		fileMutex:         new(sync.RWMutex),
+		fileName:          fileName,
+		id:                id,
+		idMutex:           new(sync.RWMutex),
+		isClosed:          false,
+		isClosedMutex:     new(sync.RWMutex),
+		offset:            -1,
+		offsetMutex:       new(sync.RWMutex),
 		logger: log.WithFields(log.Fields{
 			"fileName": fileName,
 			"id":       id,
 		}),
 	}
 
-	DataSegmentOperationDurationMilliseconds.WithLabelValues(segment.id, CreateDataSegmentOperation).Observe(float64(time.Since(start).Milliseconds()))
-	DataSegmentOperationDurationNanoseconds.WithLabelValues(segment.id, CreateDataSegmentOperation).Observe(float64(time.Since(start).Nanoseconds()))
+	DataSegmentOperationDurationMilliseconds.WithLabelValues(
+		segment.id, CreateDataSegmentOperation).Observe(float64(time.Since(start).Milliseconds()))
+	DataSegmentOperationDurationNanoseconds.WithLabelValues(
+		segment.id, CreateDataSegmentOperation).Observe(float64(time.Since(start).Nanoseconds()))
 
 	return segment, nil
 }
