@@ -1,12 +1,9 @@
 package core_test
 
 import (
-	"context"
-	"fmt"
 	"kv/core"
 	"math/rand"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
@@ -17,7 +14,7 @@ import (
 )
 
 func init() {
-	logrus.SetLevel(logrus.InfoLevel)
+	logrus.SetLevel(logrus.DebugLevel)
 	logrus.SetOutput(os.Stdout)
 }
 
@@ -56,6 +53,8 @@ func benchmarkGet(valueSize int, engine *core.Engine, b *testing.B) {
 	if err := engine.Set(key, value); err != nil {
 		b.Fatal(err)
 	}
+
+	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
 		if _, err := engine.Get(key); err != nil {
@@ -152,7 +151,7 @@ func TestConcurrentWrites(t *testing.T) {
 
 	defer engine.Close()
 
-	writesGroup, _ := errgroup.WithContext(context.Background())
+	writesGroup := new(errgroup.Group)
 	writesGroup.SetLimit(WritesWorkersCount)
 
 	keysLengthWritten := 0
@@ -166,22 +165,24 @@ func TestConcurrentWrites(t *testing.T) {
 			keysLengthWritten += len(key)
 			valuesLengthWritten += len(value)
 
-			writesGroup.Go(func() error {
-				// logrus.Printf("concurrent writes job %d - key size %d - value size %d", i, len(key), len(value))
+			writesGroup.Go(func(key, value string) func() error {
+				return func() error {
+					if err := engine.Set(key, value); err != nil {
+						return err
+					}
 
-				if err := engine.Set(key, value); err != nil {
-					panic(err)
+					if os.Getenv("CI") != "true" {
+						bar.Add(1)
+					}
+					return nil
 				}
-
-				if os.Getenv("CI") != "true" {
-					bar.Add(1)
-				}
-				return nil
-			})
+			}(key, value))
 		}
 	}
 
-	writesGroup.Wait()
+	if err := writesGroup.Wait(); err != nil {
+		t.Fatal(err)
+	}
 
 	duration := time.Since(start).Seconds()
 	rate := float64(jobCount) / duration
@@ -215,29 +216,31 @@ func TestConcurrentReads(t *testing.T) {
 		}
 	}
 
-	wg := new(sync.WaitGroup)
+	wg := new(errgroup.Group)
+	wg.SetLimit(ReadsWorkersCount)
 	for z := 0; z < ReadsWorkersCount; z++ {
-		go func(wg *sync.WaitGroup, id int) {
-			for i := 0; i < ReadsJobsCount; i++ {
-				keyIndex := rand.Intn(keysLength)
-				key := keys[keyIndex]
+		wg.Go(func(id int) func() error {
+			return func() error {
+				for i := 0; i < ReadsJobsCount; i++ {
+					keyIndex := rand.Intn(keysLength)
+					key := keys[keyIndex]
 
-				// logrus.Printf("concurrent reads worker %d - job %d - key size %d - key index %d", id, i, len(key), keyIndex)
+					if _, err := engine.Get(key); err != nil {
+						t.Fatal(err)
+					}
 
-				if _, err := engine.Get(key); err != nil {
-					panic(fmt.Sprintf("%v: key - %s", err, key))
+					if os.Getenv("CI") != "true" {
+						bar.Add(1)
+					}
 				}
-
-				if os.Getenv("CI") != "true" {
-					bar.Add(1)
-				}
+				return nil
 			}
-			wg.Done()
-		}(wg, z)
-		wg.Add(1)
+		}(z))
 	}
 
-	wg.Wait()
+	if err := wg.Wait(); err != nil {
+		t.Fatal(err)
+	}
 
 	duration := time.Since(start).Seconds()
 	rate := float64(jobCount) / duration
@@ -245,4 +248,46 @@ func TestConcurrentReads(t *testing.T) {
 		"total reads %d - %f reads/s - duration %fs",
 		jobCount, rate, duration,
 	)
+}
+
+func TestReadAfterWrite(t *testing.T) {
+	engine, err := makeEngine(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer engine.Close()
+
+	const keysLength int = 1000
+	keys := make([]string, keysLength)
+	for i := 0; i < keysLength; i++ {
+		expectedKey := randomStringBetween(200, 400)
+		keys[i] = expectedKey
+
+		if err := engine.Set(expectedKey, randomString(1000)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	wg := new(errgroup.Group)
+	wg.SetLimit(keysLength)
+
+	for _, key := range keys {
+		key := key
+
+		wg.Go(func(key string) func() error {
+			return func() error {
+				for i := 0; i < 100; i++ {
+					if _, err := engine.Get(key); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return nil
+			}
+		}(key))
+	}
+
+	if err := wg.Wait(); err != nil {
+		t.Fatal(err)
+	}
 }

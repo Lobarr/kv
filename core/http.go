@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/compress"
 	"github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/gofiber/fiber/v2/middleware/requestid"
 	"github.com/gofiber/helmet/v2"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sherifabdlnaby/configuro"
@@ -28,7 +30,6 @@ type KvHttpServer struct {
 type KvHttpServerConfig struct {
 	EngineConfig  *EngineConfig // store configuration
 	ExposeMetrics bool          // flag to expose metrics
-	LogLevel      logrus.Level  // sets log level
 	Port          int           // port for http server to listen on
 	MetricsPort   int           // ports for expose metrics server to listen on
 }
@@ -85,6 +86,7 @@ func (kv *KvHttpServer) setupMiddlewares() {
 	kv.server.Use(compress.New())
 	kv.server.Use(logger.New())
 	kv.server.Use(helmet.New())
+	kv.server.Use(requestid.New())
 }
 
 func (kv *KvHttpServer) setupInterruptHandler() {
@@ -166,16 +168,15 @@ func NewHttpServer() (*KvHttpServer, error) {
 		config: &KvHttpServerConfig{
 			EngineConfig: &EngineConfig{
 				SegmentMaxSize:             10000,
-				SnapshotInterval:           10 * time.Second,
+				SnapshotInterval:           30 * time.Second,
 				TolerableSnapshotFailCount: 5,
 				CacheSize:                  1000,
-				CompactorInterval:          10 * time.Second,
+				CompactorInterval:          30 * time.Second,
 				CompactorWorkerCount:       3,
-				SnapshotTTLDuration:        15 * time.Second,
+				SnapshotTTLDuration:        60 * time.Second,
 				DataPath:                   path,
 			},
 			ExposeMetrics: true,
-			LogLevel:      logrus.InfoLevel,
 			Port:          9998,
 			MetricsPort:   9999,
 		},
