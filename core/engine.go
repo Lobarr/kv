@@ -182,6 +182,7 @@ type EngineConfig struct {
 	CompactorWorkerCount       int           // number of workers compaction process uses
 	SnapshotTTLDuration        time.Duration // snapshot files time to live duration
 	DataPath                   string        // path where store data is persisted on disk
+	ShouldCompact              bool          // should the data be compacted at the specified interval
 }
 
 // captureSnapshots captures snapshots at an interval
@@ -198,10 +199,12 @@ func (engine *Engine) captureSnapshots(ctx context.Context, interval time.Durati
 
 		select {
 		case <-ticker.C:
+			engine.mu.RLock()
 			if err := engine.snapshot(); err != nil {
 				fmt.Printf("error %s", err)
 				failCounts++
 			}
+			engine.mu.RUnlock()
 		case <-ctx.Done():
 			return
 		}
@@ -357,15 +360,15 @@ func (engine *Engine) findLogEntryByKey(key string) (*LogEntry, error) {
 		cursor--
 
 		if !logEntryIndexExists {
-			engine.logger.Debugf("didn't find log entry index for key %s in segment %s", key, segmentID)
 			continue
 		}
 
 		logEntryIndex, logEntryExist := logEntryIndexesByKey[key]
 		if !logEntryExist {
-			engine.logger.Debugf("didn't find log entry for key %s in segment %s", key, segmentID)
 			continue
 		}
+
+		engine.logger.Debugf("found log entry index for key %s in segment %s", key, segmentID)
 
 		if segmentID != engine.segment.id {
 			if segment, err = engine.loadSegment(segmentID); err != nil {
@@ -383,6 +386,7 @@ func (engine *Engine) findLogEntryByKey(key string) (*LogEntry, error) {
 		return logEntry, err
 	}
 
+	engine.logger.Debugf("didn't find log entry for key %s in segment in any indexes", key)
 	return nil, ErrKeyNotFound
 }
 
@@ -473,7 +477,6 @@ func (engine *Engine) Close() error {
 			float64(time.Since(start).Nanoseconds()))
 	}()
 
-	engine.logger.Debug("closing database")
 	engine.ctxCancelFunc()
 
 	if err := engine.snapshot(); err != nil {
@@ -483,6 +486,8 @@ func (engine *Engine) Close() error {
 	if err := engine.segment.close(); err != nil {
 		return err
 	}
+
+	engine.logger.Debug("closing database")
 
 	return nil
 }
@@ -655,7 +660,7 @@ func (engine Engine) processSegmentJob(compactedSegmentEntriesChan chan compacte
 			continue
 		}
 
-		logEntry := &LogEntry{}
+		logEntry := NewLogEntry("", "")
 		err = logEntry.Decode(logEntryBytes)
 
 		if err != nil {
@@ -694,8 +699,9 @@ func (engine Engine) persistCompactedSegment(compactedLogEntries map[string]*Log
 		}
 
 		engine.addLogEntryIndexToSegment(compactedSegment.id, logEntry.Key, logEntryIndex)
-		engine.segmentsMetadataList.Add(compactedSegment.id)
 	}
+
+	engine.segmentsMetadataList.Add(compactedSegment.id)
 
 	if !compactedSegment.isClosed {
 		if err := compactedSegment.close(); err != nil {
@@ -726,9 +732,6 @@ func (engine Engine) cleanUpStaleSegments(segmentsToDelete []segmentContext, com
 // compactSegments compacts data segments by joining closed segments together
 // and getting rid of duplicaate log engtries by keys
 func (engine *Engine) compactSegments() error {
-	engine.mu.Lock()
-	defer engine.mu.Unlock()
-
 	engine.logger.Debug("compacting segments")
 	start := time.Now()
 	segmentsToDelete := make([]segmentContext, 0)
@@ -771,26 +774,32 @@ func (engine *Engine) compactSegments() error {
 		defer close(compactedSegmentEntriesChan)
 		workerGroup, _ := errgroup.WithContext(resultsGroupCtx)
 
+		engine.mu.RLock()
 		concurrencyLimit := engine.compactorWorkerCount
 		if concurrencyLimit < 1 {
 			concurrencyLimit = 5 // default concurrency limit
 		}
+		engine.mu.RUnlock()
 
 		workerGroup.SetLimit(concurrencyLimit)
 
 		// concurrently compact segments
 		for _, file := range files {
+			f := file
 			workerGroup.Go(func() error {
+				engine.mu.RLock()
+				defer engine.mu.RUnlock()
+
 				EngineActiveWorkers.WithLabelValues(CompactSegmentsOperation).Inc()
 				defer EngineActiveWorkers.WithLabelValues(CompactSegmentsOperation).Dec()
 
-				if !strings.Contains(file.Name(), ".segment") || engine.segment.fileName == file.Name() {
-					engine.logger.Debugf("skipping dispatching of file %s - cur segment %s", file.Name(), engine.segment.fileName)
+				if !strings.Contains(f.Name(), ".segment") || engine.segment.fileName == f.Name() {
+					engine.logger.Debugf("skipping dispatching of file %s - cur segment %s", f.Name(), engine.segment.fileName)
 					return nil
 				}
 
-				segmentID := strings.Split(file.Name(), ".")[0]
-				segmentContentBytes, err := ioutil.ReadFile(path.Join(getSegmentsPath(), file.Name()))
+				segmentID := strings.Split(f.Name(), ".")[0]
+				segmentContentBytes, err := ioutil.ReadFile(path.Join(getSegmentsPath(), f.Name()))
 
 				if err != nil {
 					return err
@@ -802,21 +811,22 @@ func (engine *Engine) compactSegments() error {
 					return nil
 				}
 
-				logEntryIndexes := make([]*LogEntryIndex, len(segmentContentBytes))
-
+				logEntryIndexes := make([]*LogEntryIndex, len(segmentLogEntryIndexes))
+				i := 0
 				for _, logEntryIndex := range segmentLogEntryIndexes {
-					logEntryIndexes = append(logEntryIndexes, logEntryIndex)
+					logEntryIndexes[i] = logEntryIndex
+					i++
 				}
 
 				engine.processSegmentJob(compactedSegmentEntriesChan, &jobContext{
-					timestamp:                 file.ModTime().Unix(),
+					timestamp:                 f.ModTime().Unix(),
 					compressedLogEntriesBytes: segmentContentBytes,
 					segmentID:                 segmentID,
 					logEntryIndexes:           logEntryIndexes,
 				})
 
 				segmentsToDelete = append(segmentsToDelete, segmentContext{
-					fileName: file.Name(),
+					fileName: f.Name(),
 					id:       segmentID,
 				})
 
@@ -847,6 +857,10 @@ func (engine *Engine) compactSegments() error {
 			compactedLogEntries[key] = logEntry
 		}
 	}
+
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+
 	// writes log entries to to compacted segment and index it in memory
 	if err = engine.persistCompactedSegment(compactedLogEntries); err != nil {
 		engine.logger.Errorf("error occurred when persisting compacted segments %v", err)
@@ -856,7 +870,9 @@ func (engine *Engine) compactSegments() error {
 	engine.logger.Debugf("wrote %d compacted log entries", len(compactedLogEntries))
 
 	// clean up segment references from memory
-	engine.cleanUpStaleSegments(segmentsToDelete, compactedLogEntries)
+	if err = engine.cleanUpStaleSegments(segmentsToDelete, compactedLogEntries); err != nil {
+		return err
+	}
 
 	engine.logger.Debugf("cleaned up %d segments", len(segmentsToDelete))
 
@@ -909,42 +925,54 @@ func (engine *Engine) compactSnapshots() error {
 func (engine *Engine) startCompactors(ctx context.Context) error {
 	engine.logger.Debug("starting compactor processes")
 	ticker := time.NewTicker(engine.compactorInterval)
+	wg := new(errgroup.Group)
+	wg.SetLimit(2)
 
 	// segment compactor
-	go func(ctx context.Context) {
+	wg.Go(func() error {
 		for {
 			select {
 			case <-ctx.Done():
 				engine.logger.Debug("stopping segments compactor process")
-				return
+				return nil
 
 			case <-ticker.C:
-				if !engine.isCompactingSegments && engine.lruSegments.Len() > 1 {
+				engine.mu.RLock()
+				isCompactingSegments := engine.isCompactingSegments
+				hasLruSegments := engine.lruSegments.Len() > 1
+				engine.mu.RUnlock()
+
+				if !isCompactingSegments && hasLruSegments {
+					engine.mu.Lock()
 					engine.isCompactingSegments = true
+					engine.mu.Unlock()
 
 					if err := engine.compactSegments(); err != nil {
 						panic(fmt.Sprintf("error compacting segments: %v", err))
 					}
 
+					engine.mu.Lock()
 					engine.isCompactingSegments = false
+					engine.mu.Unlock()
+
 					EngineSegmentsCompactionCount.Inc()
 				}
 			}
 		}
-	}(ctx)
+	})
 
 	// snapshot compactor
-	go func(ctx context.Context) {
+	wg.Go(func() error {
 		for {
 			select {
 			case <-ctx.Done():
 				engine.logger.Debug("stopping snapshots compactor process")
-				return
+				return nil
 
 			case <-ticker.C:
-				isCompactingSnapshots := engine.isCompactingSnapshots
+				engine.mu.RLock()
 
-				if !isCompactingSnapshots {
+				if !engine.isCompactingSnapshots {
 					engine.isCompactingSnapshots = true
 
 					if err := engine.compactSnapshots(); err != nil {
@@ -954,9 +982,13 @@ func (engine *Engine) startCompactors(ctx context.Context) error {
 					engine.isCompactingSnapshots = false
 					EngineSnapshotsCompactionCount.Inc()
 				}
+
+				engine.mu.RUnlock()
 			}
 		}
-	}(ctx)
+	})
+
+	wg.Wait()
 
 	return nil
 }
@@ -1065,7 +1097,10 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 	}
 
 	go engine.captureSnapshots(engine.ctx, config.SnapshotInterval, config.TolerableSnapshotFailCount)
-	go engine.startCompactors(engine.ctx)
+
+	if config.ShouldCompact {
+		go engine.startCompactors(engine.ctx)
+	}
 
 	return engine, nil
 }

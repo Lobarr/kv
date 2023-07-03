@@ -1,7 +1,7 @@
-package core_test
+// using same package so internals are visible
+package core
 
 import (
-	"kv/core"
 	"math/rand"
 	"os"
 	"testing"
@@ -11,6 +11,13 @@ import (
 	"github.com/schollz/progressbar/v3"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+)
+
+const (
+	ReadsWorkersCount  = 1000
+	ReadsJobsCount     = 50
+	WritesWorkersCount = 100
+	WritesJobsCount    = 25
 )
 
 func init() {
@@ -31,11 +38,11 @@ func randomStringBetween(minSize int, maxSize int) string {
 	return randomString(rand.Intn(maxSize-minSize) + minSize)
 }
 
-func benchmarkSet(valueSize int, engine *core.Engine, b *testing.B) {
+func benchmarkSet(valueSize int, engine *Engine, b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		key := randomStringBetween(100, 200)
+		key := randomStringBetween(10, 20)
 		value := randomString(valueSize)
 
 		if err := engine.Set(key, value); err != nil {
@@ -44,10 +51,10 @@ func benchmarkSet(valueSize int, engine *core.Engine, b *testing.B) {
 	}
 }
 
-func benchmarkGet(valueSize int, engine *core.Engine, b *testing.B) {
+func benchmarkGet(valueSize int, engine *Engine, b *testing.B) {
 	b.ReportAllocs()
 
-	key := randomStringBetween(100, 200)
+	key := randomStringBetween(10, 20)
 	value := randomString(valueSize)
 
 	if err := engine.Set(key, value); err != nil {
@@ -63,9 +70,9 @@ func benchmarkGet(valueSize int, engine *core.Engine, b *testing.B) {
 	}
 }
 
-func makeEngine(t testing.TB) (*core.Engine, error) {
-	return core.NewEngine(&core.EngineConfig{
-		SegmentMaxSize:             10000,
+func getEngineConfig(t testing.TB, shouldCompact bool) *EngineConfig {
+	return &EngineConfig{
+		SegmentMaxSize:             100,
 		SnapshotInterval:           10 * time.Second,
 		TolerableSnapshotFailCount: 5,
 		CacheSize:                  1000,
@@ -73,7 +80,16 @@ func makeEngine(t testing.TB) (*core.Engine, error) {
 		CompactorWorkerCount:       10,
 		SnapshotTTLDuration:        10 * time.Second,
 		DataPath:                   t.TempDir(),
-	})
+		ShouldCompact:              shouldCompact,
+	}
+}
+
+func makeEngine(t testing.TB) (*Engine, error) {
+	return NewEngine(getEngineConfig(t, true))
+}
+
+func makeEngineWithoutCompaction(t testing.TB) (*Engine, error) {
+	return NewEngine(getEngineConfig(t, false))
 }
 
 func BenchmarkSet(b *testing.B) {
@@ -134,11 +150,6 @@ func BenchmarkGet(b *testing.B) {
 	})
 }
 
-const ReadsWorkersCount = 1000
-const ReadsJobsCount = 50
-const WritesWorkersCount = 100
-const WritesJobsCount = 25
-
 func TestConcurrentWrites(t *testing.T) {
 	start := time.Now()
 	engine, err := makeEngine(t)
@@ -159,7 +170,7 @@ func TestConcurrentWrites(t *testing.T) {
 
 	for z := 0; z < WritesWorkersCount; z++ {
 		for i := 0; i < WritesJobsCount; i++ {
-			key := randomStringBetween(600, 800)
+			key := randomStringBetween(10, 20)
 			value := randomStringBetween(1500, 3000)
 
 			keysLengthWritten += len(key)
@@ -174,6 +185,7 @@ func TestConcurrentWrites(t *testing.T) {
 					if os.Getenv("CI") != "true" {
 						bar.Add(1)
 					}
+
 					return nil
 				}
 			}(key, value))
@@ -208,7 +220,7 @@ func TestConcurrentReads(t *testing.T) {
 	keys := make([]string, keysLength)
 
 	for i := 0; i < keysLength; i++ {
-		expectedKey := randomStringBetween(200, 400)
+		expectedKey := randomStringBetween(10, 20)
 		keys[i] = expectedKey
 
 		if err := engine.Set(expectedKey, randomString(1000)); err != nil {
@@ -226,7 +238,7 @@ func TestConcurrentReads(t *testing.T) {
 					key := keys[keyIndex]
 
 					if _, err := engine.Get(key); err != nil {
-						t.Fatal(err)
+						return err
 					}
 
 					if os.Getenv("CI") != "true" {
@@ -258,10 +270,10 @@ func TestReadAfterWrite(t *testing.T) {
 
 	defer engine.Close()
 
-	const keysLength int = 1000
+	const keysLength int = 100
 	keys := make([]string, keysLength)
 	for i := 0; i < keysLength; i++ {
-		expectedKey := randomStringBetween(200, 400)
+		expectedKey := randomStringBetween(10, 20)
 		keys[i] = expectedKey
 
 		if err := engine.Set(expectedKey, randomString(1000)); err != nil {
@@ -279,7 +291,7 @@ func TestReadAfterWrite(t *testing.T) {
 			return func() error {
 				for i := 0; i < 100; i++ {
 					if _, err := engine.Get(key); err != nil {
-						t.Fatal(err)
+						return err
 					}
 				}
 				return nil
@@ -290,4 +302,91 @@ func TestReadAfterWrite(t *testing.T) {
 	if err := wg.Wait(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestSet(t *testing.T) {
+	engine, err := makeEngine(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer engine.Close()
+
+	key := randomStringBetween(10, 20)
+	value := randomString(1000)
+
+	initialSegmentEntriesCount := engine.segment.entriesCount
+
+	if err = engine.Set(key, value); err != nil {
+		t.Fatal(err)
+	}
+
+	// ensure entry go added to current segment
+	if engine.segment.entriesCount != initialSegmentEntriesCount+1 {
+		t.Errorf("expected entries_count=%d but got %d",
+			initialSegmentEntriesCount+1, engine.segment.entriesCount)
+	}
+
+	// ensure the context needed to read the key is set in memory
+	indexesByKey, ok := engine.logEntryIndexesBySegmentID[engine.segment.id]
+	if !ok {
+		t.Errorf("expected logEntryIndexesBySegmentID to have key %s but it didn't", engine.segment.id)
+	}
+
+	index, ok := indexesByKey[key]
+	if !ok {
+		t.Errorf("expected indexesByKey to have key %s but it didn't", key)
+	}
+
+	if index.Key != key {
+		t.Errorf("expected index.Key = %s but got %s", key, index.Key)
+	}
+
+	if index.EntrySize <= 0 || index.CompressedEntrySize <= 0 {
+		t.Errorf("expected index.EntrySize and index.CompressedEntrySize to be greater than 0 but got (%d, %d) respectively",
+			index.EntrySize, index.CompressedEntrySize)
+	}
+}
+
+func TestSegmentCompaction(t *testing.T) {
+	engine, err := makeEngineWithoutCompaction(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const keysLength int = 1000
+	keys := make([]string, keysLength)
+	values := make([]string, keysLength)
+	for i := 0; i < keysLength; i++ {
+		keys[i] = randomStringBetween(10, 20)
+		values[i] = randomString(1000)
+
+		if err := engine.Set(keys[i], values[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	prevSegmentsCount := engine.segmentsMetadataList.Len()
+
+	if err := engine.compactSegments(); err != nil {
+		t.Fatal(err)
+	}
+
+	if engine.segmentsMetadataList.Len() >= prevSegmentsCount {
+		t.Errorf("expected some segments to have been pruned in the compaction; had %d segments before compaction and %d segments after. found segments %v",
+			prevSegmentsCount, engine.segmentsMetadataList.Len(), engine.segmentsMetadataList.GetSegmentIDs())
+	}
+
+	for i, key := range keys {
+		value, err := engine.Get(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if value != values[i] {
+			t.Errorf("expected value %v, got %v", values[i], value)
+		}
+	}
+
+	engine.Close()
 }

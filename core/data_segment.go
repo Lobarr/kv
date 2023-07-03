@@ -180,7 +180,7 @@ func (ds *dataSegment) getLogEntry(logEntryIndex *LogEntryIndex) (*LogEntry, err
 		return nil, err
 	}
 
-	logEntry := &LogEntry{}
+	logEntry := NewLogEntry("", "")
 	err = logEntry.Decode(logEntryBytes)
 
 	if err != nil {

@@ -37,16 +37,21 @@ type LogEntry struct {
 }
 
 // Encode encodes the log entry to bytes using msgpack
-func (le LogEntry) Encode() ([]byte, error) {
+func (le *LogEntry) Encode() ([]byte, error) {
 	le.mu.RLock()
 	defer le.mu.RUnlock()
 	return msgpack.Marshal(&le)
+	// return json.Marshal(&le)
 }
 
 // Decode decodes log entry bytes and loads the properties
 func (le *LogEntry) Decode(logEntryBytes []byte) error {
+	le.mu.Lock()
+	defer le.mu.Unlock()
+
 	logEntry := &LogEntry{}
 	err := msgpack.Unmarshal(logEntryBytes, logEntry)
+	// err := json.Unmarshal(logEntryBytes, logEntry)
 
 	if err != nil {
 		return err

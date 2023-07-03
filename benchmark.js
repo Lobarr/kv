@@ -22,17 +22,19 @@ function generateRandomString(size) {
   return randomString;
 }
 
-const keys = Array.from({ length: 10 }, () => generateRandomString(100));
+const keys = Array.from({ length: 10 }, () => generateRandomString(20));
 
 export default function () {
   for (const key of keys) {
     const value = generateRandomString(10000);
 
-    const set_response = http.post(`http://localhost:9998/keys/${key}`, value);
-    check(set_response, { 'set request suceeded': (r) => r.status == 200 });
+    const setResponse = http.post(`http://localhost:9998/keys/${key}`, value);
+    console.log(setResponse.body)
+    check(setResponse, { 'set request suceeded': (r) => r.status == 200 });
 
-    const get_response = http.get(`http://localhost:9998/keys/${key}`);
-    check(get_response, { 'get request suceeded and value is accurate': (r) => r.status === 200 && r.body === value });
+    const getResponse = http.get(`http://localhost:9998/keys/${key}`);
+    console.log(getResponse.body)
+    check(getResponse, { 'get request suceeded and value is accurate': (r) => r.status === 200 && r.body === value });
 
   }
 }

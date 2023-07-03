@@ -175,6 +175,7 @@ func NewHttpServer() (*KvHttpServer, error) {
 				CompactorWorkerCount:       3,
 				SnapshotTTLDuration:        60 * time.Second,
 				DataPath:                   path,
+				ShouldCompact:              true,
 			},
 			ExposeMetrics: true,
 			Port:          9998,
