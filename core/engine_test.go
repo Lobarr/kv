@@ -21,7 +21,7 @@ const (
 )
 
 func init() {
-	logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetLevel(logrus.InfoLevel)
 	logrus.SetOutput(os.Stdout)
 }
 
@@ -314,7 +314,6 @@ func TestSet(t *testing.T) {
 
 	key := randomStringBetween(10, 20)
 	value := randomString(1000)
-
 	initialSegmentEntriesCount := engine.segment.entriesCount
 
 	if err = engine.Set(key, value); err != nil {
@@ -353,6 +352,7 @@ func TestSegmentCompaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer engine.Close()
 
 	const keysLength int = 1000
 	keys := make([]string, keysLength)
@@ -387,6 +387,4 @@ func TestSegmentCompaction(t *testing.T) {
 			t.Errorf("expected value %v, got %v", values[i], value)
 		}
 	}
-
-	engine.Close()
 }

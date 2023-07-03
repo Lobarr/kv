@@ -156,13 +156,7 @@ func (kv *KvHttpServer) startMetricsServer() error {
 	return http.ListenAndServe(fmt.Sprintf(":%d", kv.config.MetricsPort), nil)
 }
 
-func NewHttpServer() (*KvHttpServer, error) {
-	path, err := filepath.Abs(fmt.Sprintf("%s/.kv/data", os.Getenv("HOME")))
-
-	if err != nil {
-		return nil, err
-	}
-
+func newKvHttpServer(path string) (*KvHttpServer, error) {
 	return &KvHttpServer{
 		server: fiber.New(),
 		config: &KvHttpServerConfig{
@@ -182,4 +176,15 @@ func NewHttpServer() (*KvHttpServer, error) {
 			MetricsPort:   9999,
 		},
 	}, nil
+
+}
+
+func NewHttpServer() (*KvHttpServer, error) {
+	path, err := filepath.Abs(fmt.Sprintf("%s/.kv/data", os.Getenv("HOME")))
+
+	if err != nil {
+		return nil, err
+	}
+
+	return newKvHttpServer(path)
 }

@@ -6,7 +6,6 @@ export const options = {
     { duration: '20s', target: 10 },
     { duration: '20s', target: 100 },
     { duration: '20s', target: 500 },
-    { duration: '20s', target: 1000 },
   ],
 };
 
@@ -22,19 +21,13 @@ function generateRandomString(size) {
   return randomString;
 }
 
-const keys = Array.from({ length: 10 }, () => generateRandomString(20));
+export default function() {
+  const key = generateRandomString(20)
+  const value = generateRandomString(10000);
 
-export default function () {
-  for (const key of keys) {
-    const value = generateRandomString(10000);
+  const setResponse = http.post(`http://localhost:9998/keys/${key}`, value);
+  check(setResponse, { 'set request suceeded': (r) => r.status == 200 });
 
-    const setResponse = http.post(`http://localhost:9998/keys/${key}`, value);
-    console.log(setResponse.body)
-    check(setResponse, { 'set request suceeded': (r) => r.status == 200 });
-
-    const getResponse = http.get(`http://localhost:9998/keys/${key}`);
-    console.log(getResponse.body)
-    check(getResponse, { 'get request suceeded and value is accurate': (r) => r.status === 200 && r.body === value });
-
-  }
+  const getResponse = http.get(`http://localhost:9998/keys/${key}`);
+  check(getResponse, { 'get request suceeded and value is accurate': (r) => r.status === 200 && r.body === value });
 }
