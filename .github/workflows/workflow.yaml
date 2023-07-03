@@ -13,8 +13,3 @@ jobs:
 
     - name: test storage engine
       run: make test
-
-    - name: benchmark storage engine
-      uses: grafana/k6-action@v0.3.0
-      with:
-        filename: benchmark.js
