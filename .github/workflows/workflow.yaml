@@ -7,6 +7,14 @@ jobs:
     steps:
     - uses: actions/checkout@master
 
+    - name: Cache Go dependencies
+      uses: actions/cache@v2
+      with:
+        path: ~/.cache/go-build
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
     - uses: actions/setup-go@v2
       with:
         go-version: '^1.16.5' # The Go version to download (if necessary) and use.
