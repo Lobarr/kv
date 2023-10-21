@@ -14,6 +14,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/requestid"
 	"github.com/gofiber/helmet/v2"
+	pyroscope "github.com/grafana/pyroscope-go"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sherifabdlnaby/configuro"
 	"github.com/sirupsen/logrus"
@@ -22,16 +23,18 @@ import (
 const ConfigPath = "/kv/config.yaml"
 
 type KvHttpServer struct {
-	server *fiber.App          // http server instance
-	store  Store               // store instance
-	config *KvHttpServerConfig // server configuration
+	server   *fiber.App          // http server instance
+	store    Store               // store instance
+	config   *KvHttpServerConfig // server configuration
+	profiler *pyroscope.Profiler // server profiler
 }
 
 type KvHttpServerConfig struct {
-	EngineConfig  *EngineConfig // store configuration
-	ExposeMetrics bool          // flag to expose metrics
-	Port          int           // port for http server to listen on
-	MetricsPort   int           // ports for expose metrics server to listen on
+	EngineConfig   *EngineConfig // store configuration
+	ExposeMetrics  bool          // flag to expose metrics
+	ExposeProfiles bool          // flag to exposevprofiles
+	Port           int           // port for http server to listen on
+	MetricsPort    int           // ports for expose metrics server to listen on
 }
 
 func (kv *KvHttpServer) handleGetRequest(ctx *fiber.Ctx) error {
@@ -96,9 +99,17 @@ func (kv *KvHttpServer) setupInterruptHandler() {
 	go func() {
 		<-signalChan // block till signal is received
 		logrus.Info("Received an interrupt, cleaning up...")
+
+		if kv.config.ExposeProfiles {
+			if err := kv.profiler.Stop(); err != nil {
+				logrus.Error("Failed to stop profiler", err)
+			}
+		}
+
 		if err := kv.store.Close(); err != nil {
 			logrus.Fatal(err)
 		}
+
 		os.Exit(0)
 	}()
 }
@@ -121,6 +132,21 @@ func (kv *KvHttpServer) loadConfigs() error {
 	return nil
 }
 
+func (kv *KvHttpServer) startProfiling() error {
+	var logger pyroscope.Logger
+	if kv.config.EngineConfig.ProfilerConfig.EnableLogging {
+		logger = pyroscope.StandardLogger
+	}
+
+	p, err := pyroscope.Start(pyroscope.Config{
+		ApplicationName: kv.config.EngineConfig.ProfilerConfig.ApplicationName,
+		ServerAddress:   kv.config.EngineConfig.ProfilerConfig.ServerAddress,
+		Logger:          logger,
+	})
+	kv.profiler = p
+	return err
+}
+
 func (kv *KvHttpServer) StartServer() error {
 	if err := kv.loadConfigs(); err != nil {
 		return err
@@ -140,6 +166,10 @@ func (kv *KvHttpServer) StartServer() error {
 
 	if kv.config.ExposeMetrics {
 		go kv.startMetricsServer()
+	}
+
+	if kv.config.ExposeProfiles {
+		kv.startProfiling()
 	}
 
 	logrus.Infof("using kv http server config %#v", kv.config)
@@ -170,10 +200,16 @@ func newKvHttpServer(path string) (*KvHttpServer, error) {
 				SnapshotTTLDuration:        60 * time.Second,
 				DataPath:                   path,
 				ShouldCompact:              true,
+				ProfilerConfig: &ProfilerConfig{
+					ApplicationName: "kv",
+					ServerAddress:   "",
+					EnableLogging:   true,
+				},
 			},
-			ExposeMetrics: true,
-			Port:          9998,
-			MetricsPort:   9999,
+			ExposeMetrics:  true,
+			ExposeProfiles: false,
+			Port:           9998,
+			MetricsPort:    9999,
 		},
 	}, nil
 

@@ -172,17 +172,24 @@ type Store interface {
 	Close() error
 }
 
+type ProfilerConfig struct {
+	ApplicationName string
+	ServerAddress   string
+	EnableLogging   bool
+}
+
 // EngineConfig configuration properties utilized when initializing an engine
 type EngineConfig struct {
-	SegmentMaxSize             int           // max size of entries stored in a data segment
-	SnapshotInterval           time.Duration // intervals that snapshots are captured
-	TolerableSnapshotFailCount int           // max number of acceptable failures during the snapshotting
-	CacheSize                  int           // max number of data segments to hold in memory
-	CompactorInterval          time.Duration // intervals that compaction process occurs
-	CompactorWorkerCount       int           // number of workers compaction process uses
-	SnapshotTTLDuration        time.Duration // snapshot files time to live duration
-	DataPath                   string        // path where store data is persisted on disk
-	ShouldCompact              bool          // should the data be compacted at the specified interval
+	SegmentMaxSize             int             // max size of entries stored in a data segment
+	SnapshotInterval           time.Duration   // intervals that snapshots are captured
+	TolerableSnapshotFailCount int             // max number of acceptable failures during the snapshotting
+	CacheSize                  int             // max number of data segments to hold in memory
+	CompactorInterval          time.Duration   // intervals that compaction process occurs
+	CompactorWorkerCount       int             // number of workers compaction process uses
+	SnapshotTTLDuration        time.Duration   // snapshot files time to live duration
+	DataPath                   string          // path where store data is persisted on disk
+	ShouldCompact              bool            // should the data be compacted at the specified interval
+	ProfilerConfig             *ProfilerConfig // config used to initialize the profiler
 }
 
 // captureSnapshots captures snapshots at an interval
