@@ -6,11 +6,10 @@ permissions:
   id-token: write
 name: workflow
 env:
-  IMAGE_NAME: ghcr.io/Lobarr/kv:${{ github.sha }}
-  IMAGE_NAME_ARM: ghcr.io/Lobarr/kv-arm:${{ github.sha }}
+  IMAGE_NAME: ghcr.io/lobarr/kv:${{ github.sha }}
+  IMAGE_NAME_ARM: ghcr.io/lobarr/kv-arm:${{ github.sha }}
 jobs:
   checks:
-    name: test workflow
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@master
@@ -19,7 +18,7 @@ jobs:
         with:
           go-version: 1.21.3
 
-      - name: test storage engine
+      - name: Test storage engine
         run: make test
 
       - name: Set up Docker Buildx
