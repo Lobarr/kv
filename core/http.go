@@ -21,7 +21,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const ConfigPath = "/kv/config.yaml"
+const ConfigPath = "config.yaml"
 
 type KvHttpServer struct {
 	server   *fiber.App          // http server instance
