@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -11,10 +12,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-const (
-	baseURL     = "http://localhost:9998"
-	numRequests = 10000
-	concurrency = 100
+var (
+	baseURL     = flag.String("base_url", "http://localhost:9998", "kv http server url")
+	numRequests = flag.Int("num_requests", 10000, "number of requests")
+	concurrency = flag.Int("concurrency", 100, "number of concurrent requests")
 )
 
 type keyValue struct {
@@ -23,7 +24,7 @@ type keyValue struct {
 }
 
 func setKey(key, value string) error {
-	url := fmt.Sprintf("%s/keys/%s", baseURL, key)
+	url := fmt.Sprintf("%s/keys/%s", *baseURL, key)
 	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(value))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %v", err)
@@ -43,7 +44,7 @@ func setKey(key, value string) error {
 }
 
 func getKey(key string, expectedValue string) error {
-	url := fmt.Sprintf("%s/keys/%s", baseURL, key)
+	url := fmt.Sprintf("%s/keys/%s", *baseURL, key)
 	resp, err := http.Get(url)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %v", err)
@@ -68,18 +69,21 @@ func getKey(key string, expectedValue string) error {
 }
 
 func main() {
+	flag.Parse()
+
 	start := time.Now()
 
-	dataSet := make([]keyValue, numRequests)
-	for i := 0; i < numRequests; i++ {
+	dataSet := make([]keyValue, *numRequests)
+	for i := 0; i < *numRequests; i++ {
 		key := fmt.Sprintf("key-%d", i)
 		value := fmt.Sprintf("value-%d", i)
 		dataSet[i] = keyValue{key: key, value: value}
 	}
 
 	var wg errgroup.Group
+	wg.SetLimit(*concurrency)
 
-	for i := 0; i < numRequests; i++ {
+	for i := 0; i < *numRequests; i++ {
 		keyValue := dataSet[i]
 		key := keyValue.key
 		value := keyValue.value
@@ -104,7 +108,7 @@ func main() {
 	elapsed := time.Since(start)
 	fmt.Printf("Benchmark completed in %s\n", elapsed)
 
-	totalRequests := numRequests * 2 // Set and Get requests
+	totalRequests := *numRequests * 2 // Set and Get requests
 	requestsPerSecond := float64(totalRequests) / elapsed.Seconds()
 	fmt.Printf("Total Requests: %d\n", totalRequests)
 	fmt.Printf("Requests per Second: %.2f\n", requestsPerSecond)
