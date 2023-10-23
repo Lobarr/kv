@@ -1,15 +1,56 @@
-on: push
+on:
+  push:
+permissions:
+  packages: write
+  contents: read
+  id-token: write
 name: workflow
+env:
+  IMAGE_NAME: ghcr.io/Lobarr/kv:${{ github.sha }}
+  IMAGE_NAME_ARM: ghcr.io/Lobarr/kv-arm:${{ github.sha }}
 jobs:
   checks:
     name: test workflow
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@master
+      - uses: actions/checkout@master
 
-    - uses: actions/setup-go@v2
-      with:
-        go-version: '^1.20.5' # The Go version to download (if necessary) and use.
+      - uses: actions/setup-go@v2
+        with:
+          go-version: 1.21.3
 
-    - name: test storage engine
-      run: make test
+      - name: test storage engine
+        run: make test
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Cache Docker layers
+        uses: actions/cache@v2
+        with:
+          path: ${{ runner.workspace }}/docker-layers
+          key: ${{ runner.os }}-docker-${{ hashFiles('**/Dockerfile', '**/Dockerfile.arm') }}
+          restore-keys: ${{ runner.os }}-docker-
+
+      - name: Setup docker
+        run: |
+          docker info
+          docker buildx create --use --name builder --driver=docker-container --bootstrap
+          docker run --privileged --rm tonistiigi/binfmt --install all
+
+      - name: Build x86 Docker Image
+        run: |
+          echo "Image name: ${{ env.IMAGE_NAME }}"
+          docker buildx build --cache-to type=local,dest=${{ runner.workspace }}/docker-layers --cache-from type=local,src=${{ runner.workspace }}/docker-layers --platform=linux/amd64 -t ${{ env.IMAGE_NAME }} -f Dockerfile --load .
+
+      - name: Build ARM Docker Image
+        run: |
+          echo "Image name: ${{ env.IMAGE_NAME_ARM }}"
+          docker buildx build --cache-to type=local,dest=${{ runner.workspace }}/docker-layers --cache-from type=local,src=${{ runner.workspace }}/docker-layers --platform=linux/arm64 -t ${{ env.IMAGE_NAME_ARM }} -f Dockerfile.arm --load .
+
+      - name: Push Docker Images
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          docker login -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }} ghcr.io
+          docker push ${{ env.IMAGE_NAME }}
+          docker push ${{ env.IMAGE_NAME_ARM }}

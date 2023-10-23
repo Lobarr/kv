@@ -2,6 +2,7 @@
 package core
 
 import (
+	"io/ioutil"
 	"math/rand"
 	"os"
 	"testing"
@@ -22,7 +23,11 @@ const (
 
 func init() {
 	logrus.SetLevel(logrus.InfoLevel)
-	logrus.SetOutput(os.Stdout)
+	if os.Getenv("CI") != "true" {
+		logrus.SetOutput(os.Stdout)
+	} else {
+		logrus.SetOutput(ioutil.Discard)
+	}
 }
 
 func randomString(n int) string {
