@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
@@ -172,8 +173,8 @@ func (kv *KvHttpServer) StartServer() error {
 		kv.startProfiling()
 	}
 
-	logrus.Infof("using kv http server config %#v", kv.config)
-	logrus.Infof("using engine config %#v", kv.config.EngineConfig)
+	conf, _ := json.Marshal(kv.config)
+	logrus.Infof("using kv http server config %s", conf)
 
 	logrus.Infof("starting kv http server on port %d", kv.config.Port)
 	return kv.server.Listen(fmt.Sprintf(":%d", kv.config.Port))

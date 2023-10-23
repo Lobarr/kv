@@ -1068,7 +1068,6 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 	segmentMetadataList.Add(segment.id)
 	logger := log.New()
 	logger.WithField("storage_engine", "hash_index")
-	logger.SetLevel(log.DebugLevel)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	engine := &Engine{
