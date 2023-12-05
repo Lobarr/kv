@@ -3,8 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -18,9 +19,13 @@ var (
 	concurrency = flag.Int("concurrency", 100, "number of concurrent requests")
 )
 
-type keyValue struct {
-	key   string
-	value string
+func randomString(n int) string {
+	letters := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+	s := make([]rune, n)
+	for i := range s {
+		s[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(s)
 }
 
 func setKey(key, value string) error {
@@ -55,7 +60,7 @@ func getKey(key string, expectedValue string) error {
 		return fmt.Errorf("failed to get key '%s', status code: %d", key, resp.StatusCode)
 	}
 
-	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %v", err)
 	}
@@ -73,22 +78,15 @@ func main() {
 
 	start := time.Now()
 
-	dataSet := make([]keyValue, *numRequests)
-	for i := 0; i < *numRequests; i++ {
-		key := fmt.Sprintf("key-%d", i)
-		value := fmt.Sprintf("value-%d", i)
-		dataSet[i] = keyValue{key: key, value: value}
-	}
-
 	var wg errgroup.Group
 	wg.SetLimit(*concurrency)
 
 	for i := 0; i < *numRequests; i++ {
-		keyValue := dataSet[i]
-		key := keyValue.key
-		value := keyValue.value
-
 		wg.Go(func() error {
+			id := randomString(8)
+			key := fmt.Sprintf("key-%s", id)
+			value := fmt.Sprintf("value-%s", id)
+
 			if err := setKey(key, value); err != nil {
 				return err
 			}

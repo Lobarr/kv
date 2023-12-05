@@ -193,12 +193,12 @@ func newKvHttpServer(path string) (*KvHttpServer, error) {
 		config: &KvHttpServerConfig{
 			EngineConfig: &EngineConfig{
 				SegmentMaxSize:             10000,
-				SnapshotInterval:           30 * time.Second,
+				SnapshotInterval:           5 * time.Minute,
 				TolerableSnapshotFailCount: 5,
 				CacheSize:                  1000,
-				CompactorInterval:          30 * time.Second,
+				CompactorInterval:          5 * time.Minute,
 				CompactorWorkerCount:       3,
-				SnapshotTTLDuration:        60 * time.Second,
+				SnapshotTTLDuration:        5 * time.Minute,
 				DataPath:                   path,
 				ShouldCompact:              true,
 				ProfilerConfig: &ProfilerConfig{

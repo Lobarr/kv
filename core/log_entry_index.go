@@ -1,6 +1,6 @@
 package core
 
-//LogEntryIndex structure used to index where a log entry is stored on disk
+// LogEntryIndex structure used to index where a log entry is stored on disk
 type LogEntryIndex struct {
 	Key                 string // used as a reference to identify entry
 	OffSet              int64  // offset of where log entry is located in the segment file on disk

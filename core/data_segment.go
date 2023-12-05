@@ -1,7 +1,6 @@
 package core
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -79,9 +78,6 @@ func init() {
 // ErrClosedDataSegment occurs when an attempt to write to a closed data segment is made
 var ErrClosedDataSegment = errors.New("data segment closed")
 
-// LogEntrySeperator represents seperator used between log entries on disk
-var LogEntrySeperator = []byte("\n")
-
 // dataSegment represents a portion of the data stored by the data store that
 // is bounded by an upper limit of number of entries
 type dataSegment struct {
@@ -99,8 +95,6 @@ type dataSegment struct {
 func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
-
-	ds.logger.Debugf("adding log entry %s to segment %s", logEntry.Key, ds.id)
 
 	start := time.Now()
 	defer func() {
@@ -124,12 +118,10 @@ func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 		return nil, err
 	}
 
-	ds.logger.Debugf("writing compressed bytes of size %d for log entry %s to segment %s",
-		len(compressedLogEntryBytes), logEntry.Key, ds.id)
+	// ds.logger.Debugf("added log entry %v to segment %s", logEntry, ds.id)
 
-	startOffSet := ds.offset
-	logEntryBytesWithSeperator := bytes.Join([][]byte{compressedLogEntryBytes, make([]byte, 0)}, LogEntrySeperator)
-	bytesWrittenSize, err := ds.file.WriteAt(logEntryBytesWithSeperator, startOffSet)
+	startOffset := ds.offset
+	bytesWrittenSize, err := ds.file.WriteAt(compressedLogEntryBytes, startOffset)
 
 	if err != nil {
 		return nil, err
@@ -137,7 +129,8 @@ func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 
 	ds.offset += int64(bytesWrittenSize)
 	ds.entriesCount++
-	ds.logger.Debugf("new data segment state : offset = %d entriesCount = %d", ds.offset, ds.entriesCount)
+	// ds.logger.Debugf("new data segment state : entry offset = (%d - %d) new offset = %d entriesCount = %d",
+	//	startOffset, ds.offset, ds.offset, ds.entriesCount)
 
 	DataSegmentLogEntryKeySizes.Observe(float64(len(logEntry.Key)))
 	DataSegmentLogEntryValueSizes.Observe(float64(len(logEntry.Value)))
@@ -150,7 +143,7 @@ func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 		EntrySize:           len(logEntryBytes),
 		CompressedEntrySize: len(compressedLogEntryBytes),
 		SegmentFilename:     ds.fileName,
-		OffSet:              startOffSet,
+		OffSet:              startOffset,
 	}, nil
 }
 
@@ -167,7 +160,7 @@ func (ds *dataSegment) getLogEntry(logEntryIndex *LogEntryIndex) (*LogEntry, err
 			ds.id, getLogEntryOperation).Observe(float64(time.Since(start).Milliseconds()))
 	}()
 
-	ds.logger.Debugf("retrieving log entry for key %s", logEntryIndex.Key)
+	ds.logger.Debugf("retrieving log entry with index %v", logEntryIndex)
 
 	compressedLogEntryBytes := make([]byte, logEntryIndex.CompressedEntrySize)
 	_, err := ds.file.ReadAt(compressedLogEntryBytes, logEntryIndex.OffSet)

@@ -1,10 +1,17 @@
 package main
 
 import (
+	"os"
+
 	"github.com/sirupsen/logrus"
 
 	"kv/core"
 )
+
+func init() {
+	logrus.SetOutput(os.Stdout)
+	logrus.SetLevel(logrus.DebugLevel)
+}
 
 func main() {
 	server, err := core.NewHttpServer()

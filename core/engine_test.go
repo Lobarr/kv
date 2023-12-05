@@ -2,6 +2,7 @@
 package core
 
 import (
+	"fmt"
 	"math/rand"
 	"os"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/schollz/progressbar/v3"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -154,7 +156,6 @@ func TestConcurrentWrites(t *testing.T) {
 	start := time.Now()
 	engine, err := makeEngine(t)
 	jobCount := WritesWorkersCount * WritesJobsCount
-	bar := progressbar.Default(int64(jobCount))
 
 	if err != nil {
 		t.Fatal(err)
@@ -182,8 +183,8 @@ func TestConcurrentWrites(t *testing.T) {
 						return err
 					}
 
-					if os.Getenv("CI") != "true" {
-						bar.Add(1)
+					if v, err := engine.Get(key); err != nil || value != v {
+						return fmt.Errorf("expected (%s, %s) but got (%s, %s); err = %v", key, value, key, v, err)
 					}
 
 					return nil
@@ -217,13 +218,13 @@ func TestConcurrentReads(t *testing.T) {
 	defer engine.Close()
 
 	const keysLength int = 500
-	keys := make([]string, keysLength)
+	keyValues := map[string]string{}
 
 	for i := 0; i < keysLength; i++ {
 		expectedKey := randomStringBetween(10, 20)
-		keys[i] = expectedKey
+		keyValues[expectedKey] = randomString(1000)
 
-		if err := engine.Set(expectedKey, randomString(1000)); err != nil {
+		if err := engine.Set(expectedKey, keyValues[expectedKey]); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -233,12 +234,19 @@ func TestConcurrentReads(t *testing.T) {
 	for z := 0; z < ReadsWorkersCount; z++ {
 		wg.Go(func(id int) func() error {
 			return func() error {
+				keys := maps.Keys(keyValues)
+
 				for i := 0; i < ReadsJobsCount; i++ {
 					keyIndex := rand.Intn(keysLength)
 					key := keys[keyIndex]
 
-					if _, err := engine.Get(key); err != nil {
+					value, err := engine.Get(key)
+					if err != nil {
 						return err
+					}
+
+					if value != keyValues[key] {
+						return fmt.Errorf("expected key %s to have value %v but got %s", key, keyValues[key], value)
 					}
 
 					if os.Getenv("CI") != "true" {
@@ -271,12 +279,12 @@ func TestReadAfterWrite(t *testing.T) {
 	defer engine.Close()
 
 	const keysLength int = 100
-	keys := make([]string, keysLength)
+	keyValues := map[string]string{}
 	for i := 0; i < keysLength; i++ {
 		expectedKey := randomStringBetween(10, 20)
-		keys[i] = expectedKey
+		keyValues[expectedKey] = randomString(1000)
 
-		if err := engine.Set(expectedKey, randomString(1000)); err != nil {
+		if err := engine.Set(expectedKey, keyValues[expectedKey]); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -284,14 +292,19 @@ func TestReadAfterWrite(t *testing.T) {
 	wg := new(errgroup.Group)
 	wg.SetLimit(keysLength)
 
-	for _, key := range keys {
+	for _, key := range maps.Keys(keyValues) {
 		key := key
 
 		wg.Go(func(key string) func() error {
 			return func() error {
 				for i := 0; i < 100; i++ {
-					if _, err := engine.Get(key); err != nil {
+					value, err := engine.Get(key)
+					if err != nil {
 						return err
+					}
+
+					if value != keyValues[key] {
+						return fmt.Errorf("expected key %s to have value %v but got %s", key, keyValues[key], value)
 					}
 				}
 				return nil
@@ -327,12 +340,7 @@ func TestSet(t *testing.T) {
 	}
 
 	// ensure the context needed to read the key is set in memory
-	indexesByKey, ok := engine.logEntryIndexesBySegmentID[engine.segment.id]
-	if !ok {
-		t.Errorf("expected logEntryIndexesBySegmentID to have key %s but it didn't", engine.segment.id)
-	}
-
-	index, ok := indexesByKey[key]
+	index, ok := engine.logEntryIndexesByKey[LogEntryIndexKey{engine.segment.id, key}]
 	if !ok {
 		t.Errorf("expected indexesByKey to have key %s but it didn't", key)
 	}

@@ -6,13 +6,15 @@ require (
 	github.com/dustin/go-humanize v1.0.0
 	github.com/gofiber/fiber/v2 v2.47.0
 	github.com/gofiber/helmet/v2 v2.2.26
-	github.com/google/uuid v1.3.0
+	github.com/google/uuid v1.4.0
+	github.com/grafana/pyroscope-go v1.0.4
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/prometheus/client_golang v1.16.0
 	github.com/schollz/progressbar/v3 v3.8.2
 	github.com/sherifabdlnaby/configuro v0.0.3
 	github.com/sirupsen/logrus v1.9.3
 	github.com/vmihailenco/msgpack/v5 v5.3.5
+	golang.org/x/exp v0.0.0-20231127185646-65229373498e
 	golang.org/x/sync v0.3.0
 )
 
@@ -25,7 +27,6 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator v9.31.0+incompatible // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
-	github.com/grafana/pyroscope-go v1.0.4 // indirect
 	github.com/grafana/pyroscope-go/godeltaprof v0.1.4 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
