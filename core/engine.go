@@ -314,6 +314,7 @@ func (engine *Engine) Set(key, value string) error {
 	if err != nil {
 		return err
 	}
+
 	engine.addLogEntryIndex(logEntryIndex)
 	EngineKeysCount.Inc()
 	return nil
@@ -1097,9 +1098,9 @@ func (engine *Engine) recover() error {
 func NewEngine(config *EngineConfig) (*Engine, error) {
 	setDataPath(config.DataPath)
 
-	for _, dataPath := range []string{getDataPath(), getSegmentsPath(), getSnapshotsPath()} {
-		if _, err := os.Stat(dataPath); os.IsNotExist(err) {
-			err = os.MkdirAll(dataPath, 0777)
+	for _, p := range []string{getDataPath(), getSegmentsPath(), getSnapshotsPath()} {
+		if _, err := os.Stat(p); os.IsNotExist(err) {
+			err = os.MkdirAll(p, 0777)
 			if err != nil {
 				return nil, err
 			}

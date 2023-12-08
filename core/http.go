@@ -138,7 +138,6 @@ func (kv *KvHttpServer) startProfiling() error {
 	if kv.config.EngineConfig.ProfilerConfig.EnableLogging {
 		logger = pyroscope.StandardLogger
 	}
-
 	p, err := pyroscope.Start(pyroscope.Config{
 		ApplicationName: kv.config.EngineConfig.ProfilerConfig.ApplicationName,
 		ServerAddress:   kv.config.EngineConfig.ProfilerConfig.ServerAddress,
