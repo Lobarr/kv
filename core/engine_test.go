@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
-	"github.com/schollz/progressbar/v3"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
@@ -209,7 +208,6 @@ func TestConcurrentReads(t *testing.T) {
 	start := time.Now()
 	engine, err := makeEngine(t)
 	jobCount := ReadsWorkersCount * ReadsJobsCount
-	bar := progressbar.Default(int64(jobCount))
 
 	if err != nil {
 		t.Fatal(err)
@@ -247,10 +245,6 @@ func TestConcurrentReads(t *testing.T) {
 
 					if value != keyValues[key] {
 						return fmt.Errorf("expected key %s to have value %v but got %s", key, keyValues[key], value)
-					}
-
-					if os.Getenv("CI") != "true" {
-						bar.Add(1)
 					}
 				}
 				return nil
