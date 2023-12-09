@@ -432,7 +432,7 @@ func (engine *Engine) Get(key string) (string, error) {
 		EngineQueryCount.WithLabelValues(
 			status,
 			strings.ToLower(strconv.FormatBool(logEntry != nil)),
-			strings.ToLower(strconv.FormatBool(logEntry != nil && logEntry.IsDeleted)))
+			strings.ToLower(strconv.FormatBool(logEntry != nil && logEntry.IsDeleted))).Inc()
 	}()
 
 	engine.segmentMutex.Lock()

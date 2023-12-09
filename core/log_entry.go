@@ -20,9 +20,7 @@ func computeCheckSum(key string, value string) uint32 {
 	keyHashHex := hex.EncodeToString(keyHash[:])
 	valueHash := sha256.Sum256([]byte(value))
 	valueHashHex := hex.EncodeToString([]byte(valueHash[:]))
-	checksum := crc32.ChecksumIEEE([]byte(fmt.Sprintf("%s:%s", keyHashHex, valueHashHex)))
-
-	return checksum
+	return crc32.ChecksumIEEE([]byte(fmt.Sprintf("%s:%s", keyHashHex, valueHashHex)))
 }
 
 // LogEntry represents an entry of a record intended to be saved in

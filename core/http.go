@@ -11,9 +11,6 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/compress"
-	"github.com/gofiber/fiber/v2/middleware/logger"
-	"github.com/gofiber/fiber/v2/middleware/requestid"
 	"github.com/gofiber/helmet/v2"
 	pyroscope "github.com/grafana/pyroscope-go"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -87,10 +84,7 @@ func (kv *KvHttpServer) setupEndpoints() {
 }
 
 func (kv *KvHttpServer) setupMiddlewares() {
-	kv.server.Use(compress.New())
-	kv.server.Use(logger.New())
 	kv.server.Use(helmet.New())
-	kv.server.Use(requestid.New())
 }
 
 func (kv *KvHttpServer) setupInterruptHandler() {
