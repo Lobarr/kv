@@ -168,14 +168,12 @@ func (kv *KvHttpServer) StartServer() error {
 
 	conf, _ := json.MarshalIndent(kv.config, "", " ")
 	logrus.Infof("using kv http server config %s", conf)
-
 	logrus.Infof("starting kv http server on port %d", kv.config.Port)
 	return kv.server.Listen(fmt.Sprintf(":%d", kv.config.Port))
 }
 
 func (kv *KvHttpServer) startMetricsServer() error {
 	logrus.Infof("starting kv metrics http server on port %d", kv.config.MetricsPort)
-
 	http.Handle("/metrics", promhttp.Handler())
 	return http.ListenAndServe(fmt.Sprintf(":%d", kv.config.MetricsPort), nil)
 }
@@ -211,10 +209,8 @@ func newKvHttpServer(path string) (*KvHttpServer, error) {
 
 func NewHttpServer() (*KvHttpServer, error) {
 	path, err := filepath.Abs(fmt.Sprintf("%s/.kv/data", os.Getenv("HOME")))
-
 	if err != nil {
 		return nil, err
 	}
-
 	return newKvHttpServer(path)
 }

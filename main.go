@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/sirupsen/logrus"
 
 	"kv/core"
@@ -11,6 +13,8 @@ import (
 func init() {
 	logrus.SetOutput(os.Stdout)
 	logrus.SetLevel(logrus.DebugLevel)
+
+	prometheus.Register(collectors.NewGoCollector())
 }
 
 func main() {
