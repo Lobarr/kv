@@ -160,7 +160,7 @@ func (ds *dataSegment) getLogEntry(logEntryIndex *LogEntryIndex) (*LogEntry, err
 			ds.id, getLogEntryOperation).Observe(float64(time.Since(start).Milliseconds()))
 	}()
 
-	ds.logger.Debugf("retrieving log entry with index %v", logEntryIndex)
+	ds.logger.Debugf("[%s] retrieving log entry with index %v", logEntryIndex.Key, logEntryIndex)
 
 	compressedLogEntryBytes := make([]byte, logEntryIndex.CompressedEntrySize)
 	_, err := ds.file.ReadAt(compressedLogEntryBytes, logEntryIndex.OffSet)

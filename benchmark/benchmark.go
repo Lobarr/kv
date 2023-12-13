@@ -82,18 +82,23 @@ func main() {
 	wg.SetLimit(*concurrency)
 
 	for i := 0; i < *numRequests; i++ {
+		i := i
 		wg.Go(func() error {
 			id := randomString(8)
-			key := fmt.Sprintf("key-%s", id)
-			value := fmt.Sprintf("value-%s", id)
+			key := id
+			value := id
 
+			log.Printf("[%d] setting key %s to value %s", i, key, value)
 			if err := setKey(key, value); err != nil {
 				return err
 			}
+			log.Printf("[%d] finished setting key %s to value %s", i, key, value)
 
+			log.Printf("[%d] getting key %s", i, key)
 			if err := getKey(key, value); err != nil {
 				return err
 			}
+			log.Printf("[%d] finished getting key %s", i, key)
 
 			return nil
 		})
