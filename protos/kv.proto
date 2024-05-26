@@ -36,9 +36,7 @@ message LogEntryIndex {
   int64 offset = 2;
   // size of the entry
   int64 entry_size = 3;
-  // size of compressed entry
-  int64 compressed_entry_size = 4;
   // filename of the segment file that the logentry is stored
-  string segment_filename = 5;
+  string segment_filename = 4;
 }
 

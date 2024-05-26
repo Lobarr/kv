@@ -7,6 +7,7 @@ import (
 	"hash/crc32"
 	"kv/protos"
 	"path"
+	"strings"
 
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/encoding/prototext"
@@ -47,18 +48,15 @@ func snapshotEntryFileName(snapshot *protos.SnapshotEntry) string {
 	return path.Join(getSnapshotsPath(), fmt.Sprintf("%d-%s.snapshot", snapshot.Timestamp.AsTime().Unix(), snapshot.Id))
 }
 
-func newSnapshotEntry(state *protos.SnapshotState) (*protos.SnapshotEntry, error) {
-	data, err := prototext.Marshal(state)
-	if err != nil {
-		return nil, err
+func newSnapshotEntry(state *protos.SnapshotState) *protos.SnapshotEntry {
+	keys := strings.Builder{}
+	for k := range state.LogEntryIndexesByKey {
+		keys.WriteString(k)
 	}
-	snapshotChecksum := computeSnapshotChecksum(data)
-	snapShotID := uuid.New().String()
-
 	return &protos.SnapshotEntry{
 		Snapshot:  state,
-		Checksum:  snapshotChecksum,
-		Id:        snapShotID,
+		Checksum:  computeSnapshotChecksum([]byte(keys.String())),
+		Id:        uuid.New().String(),
 		Timestamp: timestamppb.Now(),
-	}, nil
+	}
 }

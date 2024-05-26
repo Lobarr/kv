@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -142,6 +143,9 @@ func (kv *KvHttpServer) startProfiling() error {
 }
 
 func (kv *KvHttpServer) StartServer() error {
+	runtime.SetMutexProfileFraction(10)
+	runtime.SetBlockProfileRate(10)
+
 	if err := kv.loadConfigs(); err != nil {
 		return err
 	}
@@ -185,7 +189,7 @@ func newKvHttpServer(path string) (*KvHttpServer, error) {
 		server: fiber.New(),
 		config: &KvHttpServerConfig{
 			EngineConfig: &EngineConfig{
-				SegmentMaxSize:             10000,
+				SegmentMaxSize:             50000,
 				SnapshotInterval:           5 * time.Minute,
 				TolerableSnapshotFailCount: 5,
 				CacheSize:                  1000,

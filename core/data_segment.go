@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"kv/protos"
 	"os"
@@ -14,6 +15,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	log "github.com/sirupsen/logrus"
 )
+
+var enableCompression = flag.Bool("enable_compression", false, "whether to enable compression or not")
 
 const (
 	addLogEntryOperation       = "add_log_entry"
@@ -58,11 +61,6 @@ var (
 		Name: "data_segment_log_entry_sizes",
 		Help: "size of log entries in a data segment",
 	}, []string{"segment_id"})
-
-	DataSegmentCompressedLogEntrySizes = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "data_segment_compressed_log_entry_sizes",
-		Help: "size of log entries in a data segment",
-	}, []string{"segment_id"})
 )
 
 func init() {
@@ -73,7 +71,6 @@ func init() {
 	prometheus.Register(DataSegmentLogEntryValueSizes)
 	prometheus.Register(DataSegmentLogEntryCount)
 	prometheus.Register(DataSegmentLogEntrySizes)
-	prometheus.Register(DataSegmentCompressedLogEntrySizes)
 }
 
 // ErrClosedDataSegment occurs when an attempt to write to a closed data segment is made
@@ -114,15 +111,17 @@ func (ds *dataSegment) addLogEntry(logEntry *protos.LogEntry) (*protos.LogEntryI
 		return nil, err
 	}
 
-	compressedLogEntryBytes, err := compressBytes(logEntryBytes)
-	if err != nil {
-		return nil, err
+	if *enableCompression {
+		logEntryBytes, err = compressBytes(logEntryBytes)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// ds.logger.Debugf("added log entry %v to segment %s", logEntry, ds.id)
 
 	startOffset := ds.offset
-	bytesWrittenSize, err := ds.file.WriteAt(compressedLogEntryBytes, startOffset)
+	bytesWrittenSize, err := ds.file.WriteAt(logEntryBytes, startOffset)
 
 	if err != nil {
 		return nil, err
@@ -137,14 +136,12 @@ func (ds *dataSegment) addLogEntry(logEntry *protos.LogEntry) (*protos.LogEntryI
 	DataSegmentLogEntryValueSizes.Observe(float64(len(logEntry.Value)))
 	DataSegmentLogEntrySizes.WithLabelValues(ds.id).Observe(float64(len(logEntryBytes)))
 	DataSegmentLogEntryCount.WithLabelValues(ds.id).Inc()
-	DataSegmentCompressedLogEntrySizes.WithLabelValues(ds.id).Observe(float64(len(compressedLogEntryBytes)))
 
 	return &protos.LogEntryIndex{
-		Key:                 logEntry.Key,
-		EntrySize:           int64(len(logEntryBytes)),
-		CompressedEntrySize: int64(len(compressedLogEntryBytes)),
-		SegmentFilename:     ds.fileName,
-		Offset:              startOffset,
+		Key:             logEntry.Key,
+		EntrySize:       int64(len(logEntryBytes)),
+		SegmentFilename: ds.fileName,
+		Offset:          startOffset,
 	}, nil
 }
 
@@ -161,17 +158,19 @@ func (ds *dataSegment) getLogEntry(logEntryIndex *protos.LogEntryIndex) (*protos
 			ds.id, getLogEntryOperation).Observe(float64(time.Since(start).Milliseconds()))
 	}()
 
-	ds.logger.Debugf("[%s] retrieving log entry with index %v", logEntryIndex.Key, logEntryIndex)
+	// ds.logger.Debugf("[%s] retrieving log entry with index %v", logEntryIndex.Key, logEntryIndex)
 
-	compressedLogEntryBytes := make([]byte, logEntryIndex.CompressedEntrySize)
-	_, err := ds.file.ReadAt(compressedLogEntryBytes, logEntryIndex.Offset)
+	logEntryBytes := make([]byte, logEntryIndex.EntrySize)
+	_, err := ds.file.ReadAt(logEntryBytes, logEntryIndex.Offset)
 	if err != nil {
 		return nil, err
 	}
 
-	logEntryBytes, err := uncompressBytes(compressedLogEntryBytes)
-	if err != nil {
-		return nil, err
+	if *enableCompression {
+		logEntryBytes, err = uncompressBytes(logEntryBytes)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	logEntry, err := decodeLogEntry(logEntryBytes)
@@ -182,7 +181,6 @@ func (ds *dataSegment) getLogEntry(logEntryIndex *protos.LogEntryIndex) (*protos
 	DataSegmentLogEntryKeySizes.Observe(float64(len(logEntryIndex.Key)))
 	DataSegmentLogEntryValueSizes.Observe(float64(len(logEntry.Value)))
 	DataSegmentLogEntrySizes.WithLabelValues(ds.id).Observe(float64(logEntryIndex.EntrySize))
-	DataSegmentCompressedLogEntrySizes.WithLabelValues(ds.id).Observe(float64(logEntryIndex.CompressedEntrySize))
 
 	return logEntry, nil
 }

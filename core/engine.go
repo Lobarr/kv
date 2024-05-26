@@ -148,7 +148,7 @@ type LogEntryIndexKey struct {
 }
 
 func (e LogEntryIndexKey) String() string {
-	return e.Key + "::" + e.Segment
+	return fmt.Sprintf("%s::%s", e.Key, e.Segment)
 }
 
 func (e *LogEntryIndexKey) FromString(s string) {
@@ -322,7 +322,7 @@ func (engine *Engine) addLogEntryIndex(logEntryIndex *protos.LogEntryIndex) {
 
 // Set stores a key and it's associated value
 func (engine *Engine) Set(key, value string) error {
-	engine.logger.Debugf("[%s] setting key", key)
+	// engine.logger.Debugf("[%s] setting key", key)
 
 	start := time.Now()
 	var err error
@@ -379,7 +379,7 @@ func (engine *Engine) loadSegment(segmentID string) (*dataSegment, error) {
 	} else {
 		segment = cacheHit.(*dataSegment)
 		EngineCacheHits.Inc()
-		engine.logger.Debugf("loaded data segment %s from cache", segmentID)
+		// engine.logger.Debugf("loaded data segment %s from cache", segmentID)
 	}
 
 	return segment, nil
@@ -405,12 +405,12 @@ func (engine *Engine) findLogEntryByKey(key string) (*protos.LogEntry, error) {
 
 	for cursor >= 0 {
 		segmentID := segments[cursor]
-		engine.logger.Debugf("[%s] checking segment %s", key, segmentID)
+		// engine.logger.Debugf("[%s] checking segment %s", key, segmentID)
 		indexKey := LogEntryIndexKey{key, segmentID}
-		state := strings.Builder{}
-		for key, val := range engine.state.Snapshot() {
-			state.WriteString(fmt.Sprintf("key: %v, value: %v\n", key, val))
-		}
+		// state := strings.Builder{}
+		// for key, val := range engine.state.Snapshot() {
+		// 	state.WriteString(fmt.Sprintf("key: %v, value: %v\n", key, val))
+		// }
 		logEntryIndex := engine.state.Get(&indexKey)
 		logEntryExists := logEntryIndex != nil
 		cursor--
@@ -420,8 +420,8 @@ func (engine *Engine) findLogEntryByKey(key string) (*protos.LogEntry, error) {
 		//	segmentID, logEntryIndexesByKey)
 
 		if !logEntryExists {
-			engine.logger.Debugf("[%s] didn't find log entry for key %s using index key %v in segment in %s",
-				key, key, indexKey, segmentID)
+			// engine.logger.Debugf("[%s] didn't find log entry for key %s using index key %v in segment in %s",
+			// 	key, key, indexKey, segmentID)
 			continue
 		}
 
@@ -445,7 +445,7 @@ func (engine *Engine) findLogEntryByKey(key string) (*protos.LogEntry, error) {
 
 // Get retrieves stored value for associated key
 func (engine *Engine) Get(key string) (string, error) {
-	engine.logger.Debugf("[%s] getting key", key)
+	// engine.logger.Debugf("[%s] getting key", key)
 
 	start := time.Now()
 	var logEntry *protos.LogEntry
@@ -558,11 +558,7 @@ func (engine *Engine) snapshot() error {
 	snapshotState := &protos.SnapshotState{
 		LogEntryIndexesByKey: engine.state.Snapshot(),
 	}
-
-	snapshotEntry, err := newSnapshotEntry(snapshotState)
-	if err != nil {
-		return err
-	}
+	snapshotEntry := newSnapshotEntry(snapshotState)
 
 	file, err := os.Create(snapshotEntryFileName(snapshotEntry))
 	if err != nil {
@@ -671,10 +667,10 @@ type compactedSegmentEntriesContext struct {
 }
 
 type jobContext struct {
-	timestamp                 int64
-	segmentID                 string
-	compressedLogEntriesBytes []byte
-	logEntryIndexes           []*protos.LogEntryIndex
+	timestamp       int64
+	segmentID       string
+	logEntriesBytes []byte
+	logEntryIndexes []*protos.LogEntryIndex
 }
 
 type segmentContext struct {
@@ -688,23 +684,25 @@ func (engine *Engine) processSegmentJob(compactedSegmentEntriesChan chan compact
 	latestLogEntries := make(map[string]*protos.LogEntry)
 
 	for _, logEntryIndex := range jCtx.logEntryIndexes {
-		compressedLogEntryBytes := make([]byte, logEntryIndex.CompressedEntrySize)
+		logEntryBytes := make([]byte, logEntryIndex.EntrySize)
 		logEntryReader := io.NewSectionReader(
-			bytes.NewReader(jCtx.compressedLogEntriesBytes),
+			bytes.NewReader(jCtx.logEntriesBytes),
 			logEntryIndex.Offset,
-			int64(logEntryIndex.CompressedEntrySize),
+			int64(logEntryIndex.EntrySize),
 		)
 
-		_, err := logEntryReader.Read(compressedLogEntryBytes)
+		_, err := logEntryReader.Read(logEntryBytes)
 		if err != nil {
 			engine.logger.Debugf("unable to read log entry %s from segment %s", logEntryIndex.Key, jCtx.segmentID)
 			continue
 		}
 
-		logEntryBytes, err := uncompressBytes(compressedLogEntryBytes)
-		if err != nil {
-			engine.logger.Debugf("unable to uncompress log entry of size %d due to %v", len(compressedLogEntryBytes), err)
-			continue
+		if *enableCompression {
+			logEntryBytes, err = uncompressBytes(logEntryBytes)
+			if err != nil {
+				engine.logger.Debugf("unable to uncompress log entry of size %d due to %v", len(logEntryBytes), err)
+				continue
+			}
 		}
 
 		logEntry, err := decodeLogEntry(logEntryBytes)
@@ -871,10 +869,10 @@ func (engine *Engine) compactSegments() error {
 				}
 
 				engine.processSegmentJob(compactedSegmentEntriesChan, &jobContext{
-					timestamp:                 info.ModTime().Unix(),
-					compressedLogEntriesBytes: segmentContentBytes,
-					segmentID:                 segmentID,
-					logEntryIndexes:           logEntryIndexes,
+					timestamp:       info.ModTime().Unix(),
+					logEntriesBytes: segmentContentBytes,
+					segmentID:       segmentID,
+					logEntryIndexes: logEntryIndexes,
 				})
 
 				segmentsToDeleteMutex.Lock()

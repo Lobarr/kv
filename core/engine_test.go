@@ -343,9 +343,8 @@ func TestSet(t *testing.T) {
 		t.Errorf("expected index.Key = %s but got %s", key, index.Key)
 	}
 
-	if index.EntrySize <= 0 || index.CompressedEntrySize <= 0 {
-		t.Errorf("expected index.EntrySize and index.CompressedEntrySize to be greater than 0 but got (%d, %d) respectively",
-			index.EntrySize, index.CompressedEntrySize)
+	if index.EntrySize <= 0 {
+		t.Errorf("expected index.EntrySize to be greater than 0 but got %d", index.EntrySize)
 	}
 }
 
