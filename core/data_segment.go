@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"kv/protos"
 	"os"
 	"path"
 	"sync"
@@ -92,7 +93,7 @@ type dataSegment struct {
 }
 
 // addLogEntry adds a log entry to the data segment
-func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
+func (ds *dataSegment) addLogEntry(logEntry *protos.LogEntry) (*protos.LogEntryIndex, error) {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
 
@@ -108,7 +109,7 @@ func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 		return nil, ErrClosedDataSegment
 	}
 
-	logEntryBytes, err := logEntry.Encode()
+	logEntryBytes, err := encodeLogEntry(logEntry)
 	if err != nil {
 		return nil, err
 	}
@@ -138,17 +139,17 @@ func (ds *dataSegment) addLogEntry(logEntry *LogEntry) (*LogEntryIndex, error) {
 	DataSegmentLogEntryCount.WithLabelValues(ds.id).Inc()
 	DataSegmentCompressedLogEntrySizes.WithLabelValues(ds.id).Observe(float64(len(compressedLogEntryBytes)))
 
-	return &LogEntryIndex{
+	return &protos.LogEntryIndex{
 		Key:                 logEntry.Key,
-		EntrySize:           len(logEntryBytes),
-		CompressedEntrySize: len(compressedLogEntryBytes),
+		EntrySize:           int64(len(logEntryBytes)),
+		CompressedEntrySize: int64(len(compressedLogEntryBytes)),
 		SegmentFilename:     ds.fileName,
-		OffSet:              startOffset,
+		Offset:              startOffset,
 	}, nil
 }
 
 // getLogEntry retrives the log entry from the data segment
-func (ds *dataSegment) getLogEntry(logEntryIndex *LogEntryIndex) (*LogEntry, error) {
+func (ds *dataSegment) getLogEntry(logEntryIndex *protos.LogEntryIndex) (*protos.LogEntry, error) {
 	ds.mu.RLock()
 	defer ds.mu.RUnlock()
 
@@ -163,7 +164,7 @@ func (ds *dataSegment) getLogEntry(logEntryIndex *LogEntryIndex) (*LogEntry, err
 	ds.logger.Debugf("[%s] retrieving log entry with index %v", logEntryIndex.Key, logEntryIndex)
 
 	compressedLogEntryBytes := make([]byte, logEntryIndex.CompressedEntrySize)
-	_, err := ds.file.ReadAt(compressedLogEntryBytes, logEntryIndex.OffSet)
+	_, err := ds.file.ReadAt(compressedLogEntryBytes, logEntryIndex.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -173,9 +174,7 @@ func (ds *dataSegment) getLogEntry(logEntryIndex *LogEntryIndex) (*LogEntry, err
 		return nil, err
 	}
 
-	logEntry := NewLogEntry("", "")
-	err = logEntry.Decode(logEntryBytes)
-
+	logEntry, err := decodeLogEntry(logEntryBytes)
 	if err != nil {
 		return nil, err
 	}

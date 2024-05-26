@@ -163,7 +163,9 @@ func (kv *KvHttpServer) StartServer() error {
 	}
 
 	if kv.config.ExposeProfiles {
-		kv.startProfiling()
+		if err := kv.startProfiling(); err != nil {
+			return err
+		}
 	}
 
 	conf, _ := json.MarshalIndent(kv.config, "", " ")

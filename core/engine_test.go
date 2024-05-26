@@ -334,8 +334,8 @@ func TestSet(t *testing.T) {
 	}
 
 	// ensure the context needed to read the key is set in memory
-	index, ok := engine.logEntryIndexesByKey[LogEntryIndexKey{engine.segment.id, key}]
-	if !ok {
+	index := engine.state.Get(&LogEntryIndexKey{engine.segment.id, key})
+	if index == nil {
 		t.Errorf("expected indexesByKey to have key %s but it didn't", key)
 	}
 

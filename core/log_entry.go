@@ -6,16 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
-	"sync"
+	"kv/protos"
 
-	"github.com/vmihailenco/msgpack/v5"
+	"google.golang.org/protobuf/encoding/prototext"
 )
 
 // ErEErrInvalidLogEntryChecksum occurs when a log entry is corrupted
 var ErrInvalidLogEntryChecksum = errors.New("log entry is corrupted")
 
 // computeCheckSum computes the cheksum of a key and it's associated value
-func computeCheckSum(key string, value string) uint32 {
+func computeCheckSum(key, value string) uint32 {
 	keyHash := sha256.Sum256([]byte(key))
 	keyHashHex := hex.EncodeToString(keyHash[:])
 	valueHash := sha256.Sum256([]byte(value))
@@ -23,57 +23,32 @@ func computeCheckSum(key string, value string) uint32 {
 	return crc32.ChecksumIEEE([]byte(fmt.Sprintf("%s:%s", keyHashHex, valueHashHex)))
 }
 
-// LogEntry represents an entry of a record intended to be saved in
-// the append-only log file
-type LogEntry struct {
-	mu        *sync.RWMutex // mutex that synchornizes Key
-	Key       string        // used as a reference to identify entry
-	Value     string        // data to be saved
-	Checksum  uint32        // used to detect corrupted data
-	IsDeleted bool          // used to represent tombstone
-
+// EncodeLogEntry encodes the log entry to bytes
+func encodeLogEntry(entry *protos.LogEntry) ([]byte, error) {
+	return prototext.Marshal(entry)
 }
 
-// Encode encodes the log entry to bytes using msgpack
-func (le *LogEntry) Encode() ([]byte, error) {
-	le.mu.RLock()
-	defer le.mu.RUnlock()
-	return msgpack.Marshal(&le)
-	// return json.Marshal(&le)
-}
+// DecodeLogEntry decodes log entry bytes and loads the properties
+func decodeLogEntry(payload []byte) (*protos.LogEntry, error) {
+	entry := &protos.LogEntry{}
 
-// Decode decodes log entry bytes and loads the properties
-func (le *LogEntry) Decode(logEntryBytes []byte) error {
-	le.mu.Lock()
-	defer le.mu.Unlock()
-
-	logEntry := &LogEntry{}
-	err := msgpack.Unmarshal(logEntryBytes, logEntry)
-	// err := json.Unmarshal(logEntryBytes, logEntry)
-
-	if err != nil {
-		return err
+	if err := prototext.Unmarshal(payload, entry); err != nil {
+		return nil, err
 	}
 
-	if computeCheckSum(logEntry.Key, logEntry.Value) != logEntry.Checksum {
-		return ErrInvalidLogEntryChecksum
+	if computeCheckSum(entry.Key, entry.Value) != entry.Checksum {
+		return nil, ErrInvalidLogEntryChecksum
 	}
 
-	le.Key = logEntry.Key
-	le.Value = logEntry.Value
-	le.Checksum = logEntry.Checksum
-	le.IsDeleted = logEntry.IsDeleted
-	return nil
+	return entry, nil
 }
 
 // NewLogEntry creates a new log entry
-func NewLogEntry(key string, value string) *LogEntry {
-	checksum := computeCheckSum(key, value)
-	return &LogEntry{
-		mu:        new(sync.RWMutex),
+func newLogEntry(key string, value string) *protos.LogEntry {
+	return &protos.LogEntry{
 		Key:       key,
 		Value:     value,
-		Checksum:  checksum,
+		Checksum:  computeCheckSum(key, value),
 		IsDeleted: false,
 	}
 }

@@ -3,6 +3,7 @@ package core
 import (
 	"container/heap"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -45,6 +46,7 @@ type SegmentMetadata struct {
 var ErrSegmentIdNotFound = errors.New("unable to find segment id")
 
 type SegmentMetadataList struct {
+	mu                  sync.RWMutex
 	segmentMetadataHeap []*SegmentMetadata
 	segmentIDByIndex    map[string]int // mapping of segment id to index position in the segment metadata heap
 }
@@ -84,7 +86,10 @@ func (s *SegmentMetadataList) Pop() any {
 	return segmentMetadata
 }
 
-func (s SegmentMetadataList) GetSegmentIDs() []string {
+func (s *SegmentMetadataList) GetSegmentIDs() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	segmentIDs := make([]string, len(s.segmentMetadataHeap))
 
 	for i, segmentMetadata := range s.segmentMetadataHeap {
@@ -95,6 +100,9 @@ func (s SegmentMetadataList) GetSegmentIDs() []string {
 }
 
 func (s *SegmentMetadataList) Add(segmentID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	start := time.Now()
 	defer func() {
 		SegmentMetadataListOperationDurationMilliseconds.WithLabelValues(AddOperation).Observe(
@@ -109,6 +117,9 @@ func (s *SegmentMetadataList) Add(segmentID string) {
 }
 
 func (s *SegmentMetadataList) Remove(segmentID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	start := time.Now()
 	defer func() {
 		SegmentMetadataListOperationDurationMilliseconds.WithLabelValues(RemoveOperation).Observe(

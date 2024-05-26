@@ -18,3 +18,6 @@ start-http-server:
 
 build:
 	go build -o ./bin/kv_http_server
+
+proto:
+	protoc -I=protos --go_out=. protos/*.proto

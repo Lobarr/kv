@@ -1,0 +1,44 @@
+syntax = "proto3";
+package core;
+
+option go_package = "protos/";
+
+import "google/protobuf/timestamp.proto";
+
+// LogEntry represents an entry of a record intended to be saved in
+// the append-only log file
+message LogEntry {
+  // used as a reference to identify entry
+  string key = 1;
+  // data to be saved
+  string value = 2;
+  // used to detect corrupted data
+  uint32 checksum = 3;
+  // used to represent tombstone
+  bool is_deleted = 4;
+}
+
+message SnapshotState {
+  map<string, LogEntryIndex> log_entry_indexes_by_key = 1;
+}
+
+message SnapshotEntry {
+  SnapshotState snapshot = 1;
+  uint32 checksum = 2;
+  string id = 3;
+  google.protobuf.Timestamp timestamp = 4;
+}
+
+message LogEntryIndex {
+  // used as a reference to identify entry
+  string key = 1;
+  // offset of where log entry is located in the segment file on disk
+  int64 offset = 2;
+  // size of the entry
+  int64 entry_size = 3;
+  // size of compressed entry
+  int64 compressed_entry_size = 4;
+  // filename of the segment file that the logentry is stored
+  string segment_filename = 5;
+}
+
