@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"kv/protos"
 	"os"
 	"path"
@@ -91,9 +92,6 @@ type dataSegment struct {
 
 // addLogEntry adds a log entry to the data segment
 func (ds *dataSegment) addLogEntry(logEntry *protos.LogEntry) (*protos.LogEntryIndex, error) {
-	ds.mu.Lock()
-	defer ds.mu.Unlock()
-
 	start := time.Now()
 	defer func() {
 		DataSegmentOperationDurationNanoseconds.WithLabelValues(
@@ -101,10 +99,6 @@ func (ds *dataSegment) addLogEntry(logEntry *protos.LogEntry) (*protos.LogEntryI
 		DataSegmentOperationDurationMilliseconds.WithLabelValues(
 			ds.id, addLogEntryOperation).Observe(float64(time.Since(start).Milliseconds()))
 	}()
-
-	if ds.isClosed {
-		return nil, ErrClosedDataSegment
-	}
 
 	logEntryBytes, err := encodeLogEntry(logEntry)
 	if err != nil {
@@ -118,19 +112,30 @@ func (ds *dataSegment) addLogEntry(logEntry *protos.LogEntry) (*protos.LogEntryI
 		}
 	}
 
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
+
+	if ds.isClosed {
+		return nil, ErrClosedDataSegment
+	}
+
+	// seek to the end of the file
+	startOffset, err := ds.file.Seek(0, io.SeekEnd)
+	if err != nil {
+		return nil, err
+	}
+
 	// ds.logger.Debugf("added log entry %v to segment %s", logEntry, ds.id)
 
-	startOffset := ds.offset
 	bytesWrittenSize, err := ds.file.WriteAt(logEntryBytes, startOffset)
-
 	if err != nil {
 		return nil, err
 	}
 
 	ds.offset += int64(bytesWrittenSize)
 	ds.entriesCount++
-	// ds.logger.Debugf("new data segment state : entry offset = (%d - %d) new offset = %d entriesCount = %d",
-	//	startOffset, ds.offset, ds.offset, ds.entriesCount)
+	// ds.logger.Infof("new data segment state : entry offset = (%d - %d) new offset = %d entriesCount = %d",
+	// 	startOffset, startOffset+int64(bytesWrittenSize), ds.offset, ds.entriesCount)
 
 	DataSegmentLogEntryKeySizes.Observe(float64(len(logEntry.Key)))
 	DataSegmentLogEntryValueSizes.Observe(float64(len(logEntry.Value)))
@@ -139,7 +144,7 @@ func (ds *dataSegment) addLogEntry(logEntry *protos.LogEntry) (*protos.LogEntryI
 
 	return &protos.LogEntryIndex{
 		Key:             logEntry.Key,
-		EntrySize:       int64(len(logEntryBytes)),
+		EntrySize:       int64(bytesWrittenSize),
 		SegmentFilename: ds.fileName,
 		Offset:          startOffset,
 	}, nil
@@ -158,11 +163,23 @@ func (ds *dataSegment) getLogEntry(logEntryIndex *protos.LogEntryIndex) (*protos
 			ds.id, getLogEntryOperation).Observe(float64(time.Since(start).Milliseconds()))
 	}()
 
+	fileInfo, err := ds.file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if logEntryIndex.Offset+logEntryIndex.EntrySize > fileInfo.Size() {
+		return nil, fmt.Errorf("error getting entry: offset + entry size (%d) exceeds file size (%d)", logEntryIndex.Offset+logEntryIndex.EntrySize, fileInfo.Size())
+	}
+
 	// ds.logger.Debugf("[%s] retrieving log entry with index %v", logEntryIndex.Key, logEntryIndex)
 
 	logEntryBytes := make([]byte, logEntryIndex.EntrySize)
-	_, err := ds.file.ReadAt(logEntryBytes, logEntryIndex.Offset)
+	_, err = ds.file.ReadAt(logEntryBytes, logEntryIndex.Offset)
 	if err != nil {
+		if err == io.EOF {
+			return nil, fmt.Errorf("error getting entry: reached end of file while reading")
+		}
+		fmt.Printf("error getting entry for %s with index %v: %v\n", logEntryIndex.Key, logEntryIndex, err)
 		return nil, err
 	}
 
@@ -199,7 +216,7 @@ func (ds *dataSegment) close() error {
 	}()
 
 	if !ds.isClosed {
-		ds.logger.Debug("closing data segment")
+		ds.logger.Debugf("closing data segment %s with id %s", ds.fileName, ds.id)
 
 		fileStat, err := ds.file.Stat()
 		if err != nil {
@@ -215,6 +232,12 @@ func (ds *dataSegment) close() error {
 	}
 
 	return nil
+}
+
+func (ds *dataSegment) getEntriescount() int {
+	ds.mu.RLock()
+	defer ds.mu.RUnlock()
+	return ds.entriesCount
 }
 
 // computeDataSegmentFileName computes filepath of data segment to be stored on
@@ -272,7 +295,7 @@ func loadDataSegment(id string) (*dataSegment, error) {
 		file:         file,
 		fileName:     fileName,
 		id:           id,
-		isClosed:     false,
+		isClosed:     true,
 		offset:       -1,
 		logger: log.WithFields(log.Fields{
 			"fileName": fileName,

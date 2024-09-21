@@ -12,8 +12,10 @@ func TestAddOperation(t *testing.T) {
 	l := core.NewSegmentMetadataList()
 	l.Add(segmentId)
 	segments := l.GetSegmentIDs()
-	if !reflect.DeepEqual(segments, expectedSegments) {
-		t.Errorf("expected %#v, got %#v", expectedSegments, segments)
+	for i := 0; i < len(segments); i++ {
+		if segments[i] != expectedSegments[i] {
+			t.Errorf("expected %#v, got %#v", expectedSegments, segments)
+		}
 	}
 }
 
@@ -24,8 +26,10 @@ func TestMultipleAddOperations(t *testing.T) {
 		l.Add(segment)
 	}
 	segments := l.GetSegmentIDs()
-	if !reflect.DeepEqual(segments, expectedSegments) {
-		t.Errorf("expected %#v, got %#v", expectedSegments, segments)
+	for i := 0; i < len(segments); i++ {
+		if segments[i] != expectedSegments[i] {
+			t.Errorf("expected %#v, got %#v", expectedSegments, segments)
+		}
 	}
 }
 

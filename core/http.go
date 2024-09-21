@@ -189,13 +189,13 @@ func newKvHttpServer(path string) (*KvHttpServer, error) {
 		server: fiber.New(),
 		config: &KvHttpServerConfig{
 			EngineConfig: &EngineConfig{
-				SegmentMaxSize:             50000,
-				SnapshotInterval:           5 * time.Minute,
+				SegmentMaxSize:             100,
+				SnapshotInterval:           10 * time.Second,
 				TolerableSnapshotFailCount: 5,
 				CacheSize:                  1000,
-				CompactorInterval:          5 * time.Minute,
-				CompactorWorkerCount:       3,
-				SnapshotTTLDuration:        5 * time.Minute,
+				CompactorInterval:          10 * time.Second,
+				CompactorWorkerCount:       10,
+				SnapshotTTLDuration:        10 * time.Second,
 				DataPath:                   path,
 				ShouldCompact:              true,
 				ProfilerConfig: &ProfilerConfig{

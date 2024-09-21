@@ -258,10 +258,7 @@ func TestConcurrentReads(t *testing.T) {
 
 	duration := time.Since(start).Seconds()
 	rate := float64(jobCount) / duration
-	logrus.Printf(
-		"total reads %d - %f reads/s - duration %fs",
-		jobCount, rate, duration,
-	)
+	logrus.Printf("total reads %d - %f reads/s - duration %fs", jobCount, rate, duration)
 }
 
 func TestReadAfterWrite(t *testing.T) {
@@ -334,7 +331,7 @@ func TestSet(t *testing.T) {
 	}
 
 	// ensure the context needed to read the key is set in memory
-	index := engine.state.Get(&LogEntryIndexKey{engine.segment.id, key})
+	index := engine.state.Get(&LogEntryIndexKey{key, engine.segment.id})
 	if index == nil {
 		t.Errorf("expected indexesByKey to have key %s but it didn't", key)
 	}

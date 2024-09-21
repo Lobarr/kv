@@ -51,15 +51,15 @@ type SegmentMetadataList struct {
 	segmentIDByIndex    map[string]int // mapping of segment id to index position in the segment metadata heap
 }
 
-func (s SegmentMetadataList) Len() int {
+func (s *SegmentMetadataList) Len() int {
 	return len(s.segmentMetadataHeap)
 }
 
-func (s SegmentMetadataList) Less(x, y int) bool {
+func (s *SegmentMetadataList) Less(x, y int) bool {
 	return s.segmentMetadataHeap[x].createdAt > s.segmentMetadataHeap[y].createdAt
 }
 
-func (s SegmentMetadataList) Swap(x, y int) {
+func (s *SegmentMetadataList) Swap(x, y int) {
 	s.segmentMetadataHeap[x], s.segmentMetadataHeap[y] = s.segmentMetadataHeap[y], s.segmentMetadataHeap[x]
 	s.segmentMetadataHeap[x].index = x
 	s.segmentMetadataHeap[y].index = y

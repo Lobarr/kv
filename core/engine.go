@@ -194,11 +194,13 @@ type Engine struct {
 	segmentsMetadataList       *SegmentMetadataList // historical list of segments id's
 	lruSegments                *lru.Cache           // cache that holds the most recently used data segments
 	segment                    *dataSegment         // current data segment
-	segmentMaxSize             int                  // max size of entries stored in a data segment
-	compactorInterval          time.Duration        // intervals that compaction process occurs
-	compactorWorkerCount       int                  // number of workers compaction process uses
-	snapshotTTLDuration        time.Duration        // snapshot files time to live duration
-	isCompactingSegments       bool                 // flag that ensures only one segments compaction process is running at a time
+	segmentMutex               sync.RWMutex
+	segmentMaxSize             int // max size of entries stored in a data segment
+	segmentMaxSizeMutex        sync.RWMutex
+	compactorInterval          time.Duration // intervals that compaction process occurs
+	compactorWorkerCount       int           // number of workers compaction process uses
+	snapshotTTLDuration        time.Duration // snapshot files time to live duration
+	isCompactingSegments       bool          // flag that ensures only one segments compaction process is running at a time
 	isCompactingSegmentsMutex  sync.RWMutex
 	isCompactingSnapshots      bool // flag that ensures only one snapshots compaction process is running at a time
 	isCompactingSnapshotsMutex sync.RWMutex
@@ -265,8 +267,12 @@ func (engine *Engine) captureSnapshots(
 // new data segments
 // this method is expected to be used within a writable thread safe method
 func (engine *Engine) checkDataSegment() error {
-	segmentEntriesCount := engine.segment.entriesCount
-	if segmentEntriesCount >= engine.segmentMaxSize {
+	engine.segmentMaxSizeMutex.RLock()
+	engine.segmentMutex.Lock()
+	defer engine.segmentMaxSizeMutex.RUnlock()
+	defer engine.segmentMutex.Unlock()
+
+	if engine.segment.getEntriescount() >= engine.segmentMaxSize {
 		start := time.Now()
 		var err error
 
@@ -283,19 +289,13 @@ func (engine *Engine) checkDataSegment() error {
 			return err
 		}
 
-		prevSegment := engine.segment
 		engine.segment = newDataSegment
-		engine.segmentsMetadataList.Add(newDataSegment.id)
+		engine.segmentsMetadataList.Add(engine.segment.id)
+		engine.lruSegments.Add(engine.segment.id, engine.segment)
 
 		engine.logger.Debugf("switched to new data segment with id %s", newDataSegment.id)
 
-		// clean up old segment
 		if err = engine.snapshot(); err != nil {
-			return err
-		}
-
-		// switch to new segment
-		if err = prevSegment.close(); err != nil {
 			return err
 		}
 	}
@@ -316,7 +316,9 @@ func (engine *Engine) addLogEntryIndexToSegment(segmentID string, logEntryIndex 
 
 // addLogEntryIndex stores log entry index in memory
 func (engine *Engine) addLogEntryIndex(logEntryIndex *protos.LogEntryIndex) {
+	engine.segmentMutex.RLock()
 	engine.addLogEntryIndexToSegment(engine.segment.id, logEntryIndex)
+	engine.segmentMutex.RUnlock()
 	EngineLogEntryIndexCount.Inc()
 }
 
@@ -341,7 +343,10 @@ func (engine *Engine) Set(key, value string) error {
 	}
 
 	logEntry := newLogEntry(key, value)
+	engine.segmentMutex.RLock()
 	logEntryIndex, err := engine.segment.addLogEntry(logEntry)
+	engine.segmentMutex.RUnlock()
+
 	if err != nil {
 		return err
 	}
@@ -405,27 +410,21 @@ func (engine *Engine) findLogEntryByKey(key string) (*protos.LogEntry, error) {
 
 	for cursor >= 0 {
 		segmentID := segments[cursor]
-		// engine.logger.Debugf("[%s] checking segment %s", key, segmentID)
-		indexKey := LogEntryIndexKey{key, segmentID}
-		// state := strings.Builder{}
-		// for key, val := range engine.state.Snapshot() {
-		// 	state.WriteString(fmt.Sprintf("key: %v, value: %v\n", key, val))
-		// }
-		logEntryIndex := engine.state.Get(&indexKey)
-		logEntryExists := logEntryIndex != nil
+		logEntryIndex := engine.state.Get(&LogEntryIndexKey{key, segmentID})
 		cursor--
 		searchedSegmentsCount++
 
 		// engine.logger.Debugf("checking segment %s with state %v",
 		//	segmentID, logEntryIndexesByKey)
 
-		if !logEntryExists {
+		if logEntryIndex == nil {
 			// engine.logger.Debugf("[%s] didn't find log entry for key %s using index key %v in segment in %s",
 			// 	key, key, indexKey, segmentID)
 			continue
 		}
 
 		var segment *dataSegment
+		engine.segmentMutex.RLock()
 		if segmentID != engine.segment.id {
 			if segment, err = engine.loadSegment(segmentID); err != nil {
 				return nil, err
@@ -434,12 +433,18 @@ func (engine *Engine) findLogEntryByKey(key string) (*protos.LogEntry, error) {
 			segment = engine.segment
 			EngineCacheHits.Inc()
 		}
+		engine.segmentMutex.RUnlock()
 
 		logEntry, err := segment.getLogEntry(logEntryIndex)
 		EngineSearchedDataSegments.Observe(float64(searchedSegmentsCount))
 
+		if logEntry == nil {
+			fmt.Printf("failed to read log entry for logEntryIndex=%#v, err%#v\n", logEntryIndex.String(), err)
+		}
+
 		return logEntry, err
 	}
+
 	return nil, ErrKeyNotFound
 }
 
@@ -501,7 +506,9 @@ func (engine *Engine) Delete(key string) error {
 
 	logEntry.IsDeleted = true
 	logEntry.Value = ""
+	engine.segmentMutex.RLock()
 	logEntryIndex, err := engine.segment.addLogEntry(logEntry)
+	engine.segmentMutex.RUnlock()
 
 	if err != nil {
 		return err
@@ -529,8 +536,21 @@ func (engine *Engine) Close() error {
 		return err
 	}
 
-	if err := engine.segment.close(); err != nil {
-		return err
+	engine.segmentMutex.RLock()
+	defer engine.segmentMutex.RUnlock()
+
+	// close open segments in the cache
+	for _, key := range engine.lruSegments.Keys() {
+		if v, ok := engine.lruSegments.Get(key); ok {
+			segment, ok := v.(*dataSegment)
+			if !ok {
+				continue
+			}
+
+			if err := segment.close(); err != nil {
+				return err
+			}
+		}
 	}
 
 	engine.logger.Debug("closing database")
@@ -693,26 +713,25 @@ func (engine *Engine) processSegmentJob(compactedSegmentEntriesChan chan compact
 
 		_, err := logEntryReader.Read(logEntryBytes)
 		if err != nil {
-			engine.logger.Debugf("unable to read log entry %s from segment %s", logEntryIndex.Key, jCtx.segmentID)
+			engine.logger.Errorf("unable to read log entry %s from segment %s", logEntryIndex.Key, jCtx.segmentID)
 			continue
 		}
 
 		if *enableCompression {
 			logEntryBytes, err = uncompressBytes(logEntryBytes)
 			if err != nil {
-				engine.logger.Debugf("unable to uncompress log entry of size %d due to %v", len(logEntryBytes), err)
+				engine.logger.Errorf("unable to uncompress log entry of size %d due to %v", len(logEntryBytes), err)
 				continue
 			}
 		}
 
 		logEntry, err := decodeLogEntry(logEntryBytes)
-
 		if err != nil {
 			engine.logger.Errorf("unable to decode log entry %s", logEntryIndex.Key)
 			continue
 		}
 
-		engine.logger.Debugf("processed key %s in segment %s", logEntry.Key, jCtx.segmentID)
+		// engine.logger.Debugf("processed key %s in segment %s", logEntry.Key, jCtx.segmentID)
 
 		latestLogEntries[logEntry.Key] = logEntry
 	}
@@ -735,17 +754,18 @@ func (engine *Engine) persistCompactedSegment(compactedLogEntries map[string]*pr
 			compactedSegment = newSegment
 		}
 
-		engine.logger.Debugf("compacting log entry %s into segment %s", logEntry.Key, compactedSegment.id)
-
 		logEntryIndex, err := compactedSegment.addLogEntry(logEntry)
 		if err != nil {
 			return err
 		}
 
+		engine.segmentMutex.Lock()
 		engine.addLogEntryIndexToSegment(compactedSegment.id, logEntryIndex)
+		engine.segmentMutex.Unlock()
 	}
 
 	engine.segmentsMetadataList.Add(compactedSegment.id)
+	engine.lruSegments.Add(compactedSegment.id, compactedSegment)
 
 	if !compactedSegment.isClosed {
 		if err := compactedSegment.close(); err != nil {
@@ -760,9 +780,7 @@ func (engine *Engine) persistCompactedSegment(compactedLogEntries map[string]*pr
 	return nil
 }
 
-func (engine *Engine) cleanUpStaleSegments(
-	segmentsToDelete []segmentContext, compactedLogEntries map[string]*protos.LogEntry,
-) error {
+func (engine *Engine) cleanUpStaleSegments(segmentsToDelete []segmentContext) error {
 	for _, segmentCtx := range segmentsToDelete {
 		engine.lruSegments.Remove(segmentCtx.id)
 		for key := range engine.state.Snapshot() {
@@ -788,7 +806,6 @@ func (engine *Engine) compactSegments() error {
 
 	start := time.Now()
 	segmentsToDelete := make([]segmentContext, 0)
-	var segmentsToDeleteMutex sync.Mutex
 	files := make([]fs.DirEntry, 0)
 	var err error
 
@@ -807,6 +824,7 @@ func (engine *Engine) compactSegments() error {
 		return err
 	}
 
+	segmentsToDeleteChan := make(chan segmentContext, len(files))
 	compactedSegmentEntriesChan := make(chan compactedSegmentEntriesContext, len(files))
 	compactedSegmentEntries := make([]compactedSegmentEntriesContext, len(files))
 	compactedLogEntries := make(map[string]*protos.LogEntry)
@@ -818,14 +836,19 @@ func (engine *Engine) compactSegments() error {
 
 	// collect results from worker routines
 	resultsGroup.Go(func() error {
-		for compactedSegmentEntry := range compactedSegmentEntriesChan {
-			compactedSegmentEntries = append(compactedSegmentEntries, compactedSegmentEntry)
+		for s := range compactedSegmentEntriesChan {
+			compactedSegmentEntries = append(compactedSegmentEntries, s)
+		}
+		for s := range segmentsToDeleteChan {
+			segmentsToDelete = append(segmentsToDelete, s)
 		}
 		return nil
 	})
 
 	resultsGroup.Go(func() error {
 		defer close(compactedSegmentEntriesChan)
+		defer close(segmentsToDeleteChan)
+
 		workerGroup, _ := errgroup.WithContext(resultsGroupCtx)
 
 		concurrencyLimit := engine.compactorWorkerCount
@@ -851,6 +874,7 @@ func (engine *Engine) compactSegments() error {
 				segmentContentBytes, err := os.ReadFile(path.Join(getSegmentsPath(), f.Name()))
 
 				if err != nil {
+					engine.logger.Errorf("failed to read segment %s: %v", f.Name(), err)
 					return err
 				}
 
@@ -866,6 +890,7 @@ func (engine *Engine) compactSegments() error {
 				info, err := f.Info()
 				if err != nil {
 					engine.logger.Errorf("unable to get file info for file %s", f.Name())
+					return err
 				}
 
 				engine.processSegmentJob(compactedSegmentEntriesChan, &jobContext{
@@ -875,14 +900,10 @@ func (engine *Engine) compactSegments() error {
 					logEntryIndexes: logEntryIndexes,
 				})
 
-				segmentsToDeleteMutex.Lock()
-				engine.logger.Debugf("[%s] segmentsToDeleteMutex", f.Name())
-				segmentsToDelete = append(segmentsToDelete, segmentContext{
+				segmentsToDeleteChan <- segmentContext{
 					fileName: f.Name(),
 					id:       segmentID,
-				})
-				segmentsToDeleteMutex.Unlock()
-				engine.logger.Debugf("[%s] released segmentsToDeleteMutex", f.Name())
+				}
 
 				engine.logger.Debugf("dispatched job for segment %s containing %d log entries",
 					segmentID, len(logEntryIndexes))
@@ -904,10 +925,8 @@ func (engine *Engine) compactSegments() error {
 		return compactedSegmentEntries[a].timestamp < compactedSegmentEntries[b].timestamp
 	})
 
-	for i, compactedSegmentEntry := range compactedSegmentEntries {
-		engine.logger.Debugf("processing compacted segment entry %d containing %d log entries", i, len(compactedSegmentEntry.compactedEntries))
+	for _, compactedSegmentEntry := range compactedSegmentEntries {
 		for key, logEntry := range compactedSegmentEntry.compactedEntries {
-			engine.logger.Debugf("processing log entry %s in compacted segment %d", key, i)
 			compactedLogEntries[key] = logEntry
 		}
 	}
@@ -921,7 +940,7 @@ func (engine *Engine) compactSegments() error {
 	engine.logger.Debugf("wrote %d compacted log entries", len(compactedLogEntries))
 
 	// clean up segment references from memory
-	if err = engine.cleanUpStaleSegments(segmentsToDelete, compactedLogEntries); err != nil {
+	if err = engine.cleanUpStaleSegments(segmentsToDelete); err != nil {
 		return err
 	}
 
@@ -1115,11 +1134,6 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 		return nil, err
 	}
 
-	lruCache, err := lru.New(config.CacheSize)
-	if err != nil {
-		return nil, err
-	}
-
 	segmentMetadataList.Add(segment.id)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1129,7 +1143,6 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 		},
 		segmentMaxSize:        config.SegmentMaxSize,
 		segment:               segment,
-		lruSegments:           lruCache,
 		segmentsMetadataList:  segmentMetadataList,
 		ctx:                   ctx,
 		compactorInterval:     config.CompactorInterval,
@@ -1140,6 +1153,20 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 		logger:                log.WithField("storage_engine", "hash_index"),
 		ctxCancelFunc:         cancel,
 	}
+
+	lruCache, err := lru.NewWithEvict(config.CacheSize, func(k, v interface{}) {
+		segment := v.(*dataSegment)
+		engine.logger.Infof("evicting segment %s from the cache", segment.id)
+		if err := segment.close(); err != nil {
+			engine.logger.Errorf("failed to close segment %s with id %s", segment.fileName, segment.id)
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	engine.lruSegments = lruCache
+	engine.lruSegments.Add(segment.id, segment)
 
 	engine.logger.Info("attempting to recover database")
 
