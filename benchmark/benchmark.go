@@ -961,8 +961,9 @@ func runExperiments() {
 }
 
 func printExperimentAnalysis(results []ExperimentResult) {
-	fmt.Println("\nPERFORMANCE ANALYSIS")
-	fmt.Println("====================")
+	fmt.Println("\n╔════════════════════════════════════════════════════════════════════════════════════╗")
+	fmt.Println("║                           PERFORMANCE ANALYSIS                                     ║")
+	fmt.Println("╚════════════════════════════════════════════════════════════════════════════════════╝")
 
 	// Filter successful results
 	var successResults []ExperimentResult
@@ -977,33 +978,87 @@ func printExperimentAnalysis(results []ExperimentResult) {
 		return
 	}
 
-	// 1. Top 3 Performers
-	sort.Sort(byThroughput(successResults))
-	topResults := byThroughput(successResults).Reverse()
+	// 1. TOP PERFORMERS - Read Throughput
+	sort.Slice(successResults, func(i, j int) bool {
+		return successResults[i].ReadThroughput > successResults[j].ReadThroughput
+	})
+	topReadResults := make([]ExperimentResult, len(successResults))
+	copy(topReadResults, successResults)
 
-	fmt.Println("\nTop 3 Configurations (Throughput):")
-	for i := 0; i < 3 && i < len(topResults); i++ {
-		r := topResults[i]
-		fmt.Printf("  %d. %-25s (%s): Read: %s/s, Write: %s/s (Lat Avg/P99: %.2f / %.2f ms)\n",
-			i+1, r.Config.Name, r.Config.Mode, formatNumber(r.ReadThroughput), formatNumber(r.WriteThroughput), r.Latency, r.LatP99)
+	fmt.Println("\n┌─ Top 3 Configurations (Read Throughput) ─────────────────────────────────────────┐")
+	for i := 0; i < 3 && i < len(topReadResults); i++ {
+		r := topReadResults[i]
+		fmt.Printf("│ %d. %-25s (%s)\n", i+1, r.Config.Name, r.Config.Mode)
+		fmt.Printf("│    Read: %s/s  │  Write: %s/s  │  Latency (Avg/P99): %.2f / %.2f ms\n",
+			formatNumber(r.ReadThroughput), formatNumber(r.WriteThroughput), r.Latency, r.LatP99)
 	}
+	fmt.Println("└──────────────────────────────────────────────────────────────────────────────────┘")
 
-	// 2. Top 3 Lowest Latency (P99)
+	// 2. TOP PERFORMERS - Write Throughput
+	sort.Slice(successResults, func(i, j int) bool {
+		return successResults[i].WriteThroughput > successResults[j].WriteThroughput
+	})
+	topWriteResults := make([]ExperimentResult, len(successResults))
+	copy(topWriteResults, successResults)
+
+	fmt.Println("\n┌─ Top 3 Configurations (Write Throughput) ────────────────────────────────────────┐")
+	for i := 0; i < 3 && i < len(topWriteResults); i++ {
+		r := topWriteResults[i]
+		fmt.Printf("│ %d. %-25s (%s)\n", i+1, r.Config.Name, r.Config.Mode)
+		fmt.Printf("│    Write: %s/s  │  Read: %s/s  │  Latency (Avg/P99): %.2f / %.2f ms\n",
+			formatNumber(r.WriteThroughput), formatNumber(r.ReadThroughput), r.Latency, r.LatP99)
+	}
+	fmt.Println("└──────────────────────────────────────────────────────────────────────────────────┘")
+
+	// 3. LOWEST LATENCY
 	sort.Sort(byLatencyP99(successResults))
+	lowLatResults := make([]ExperimentResult, len(successResults))
+	copy(lowLatResults, successResults)
 
-	fmt.Println("\nTop 3 Configurations (Lowest P99 Latency):")
-	for i := 0; i < 3 && i < len(successResults); i++ {
-		r := successResults[i]
-		fmt.Printf("  %d. %-25s (%s): %.2f ms (P99) - Read: %s/s, Write: %s/s\n",
-			i+1, r.Config.Name, r.Config.Mode, r.LatP99, formatNumber(r.ReadThroughput), formatNumber(r.WriteThroughput))
+	fmt.Println("\n┌─ Top 3 Configurations (Lowest P99 Latency) ──────────────────────────────────────┐")
+	for i := 0; i < 3 && i < len(lowLatResults); i++ {
+		r := lowLatResults[i]
+		fmt.Printf("│ %d. %-25s (%s)\n", i+1, r.Config.Name, r.Config.Mode)
+		fmt.Printf("│    P99: %.2f ms  │  Read: %s/s  │  Write: %s/s\n",
+			r.LatP99, formatNumber(r.ReadThroughput), formatNumber(r.WriteThroughput))
 	}
+	fmt.Println("└──────────────────────────────────────────────────────────────────────────────────┘")
 
-	// 3. Mode Comparison
-	fmt.Println("\nMode Comparison (Avg Throughput):")
+	// 4. BEST BALANCED (Throughput-to-Latency Ratio)
+	type balancedScore struct {
+		result ExperimentResult
+		score  float64 // Higher is better: (read + write throughput) / latency
+	}
+	var balanced []balancedScore
+	for _, r := range successResults {
+		if r.LatP99 > 0 {
+			score := (r.ReadThroughput + r.WriteThroughput) / r.LatP99
+			balanced = append(balanced, balancedScore{result: r, score: score})
+		}
+	}
+	sort.Slice(balanced, func(i, j int) bool {
+		return balanced[i].score > balanced[j].score
+	})
+
+	fmt.Println("\n┌─ Top 3 Best Balanced (Throughput/Latency) ───────────────────────────────────────┐")
+	for i := 0; i < 3 && i < len(balanced); i++ {
+		r := balanced[i].result
+		fmt.Printf("│ %d. %-25s (%s)\n", i+1, r.Config.Name, r.Config.Mode)
+		fmt.Printf("│    Read: %s/s  │  Write: %s/s  │  P99: %.2f ms  │  Score: %.0f\n",
+			formatNumber(r.ReadThroughput), formatNumber(r.WriteThroughput), r.LatP99, balanced[i].score)
+	}
+	fmt.Println("└──────────────────────────────────────────────────────────────────────────────────┘")
+
+	// 5. MODE COMPARISON
+	fmt.Println("\n┌─ Mode Comparison ────────────────────────────────────────────────────────────────┐")
 	modeStats := make(map[string]struct {
-		readSum  float64
-		writeSum float64
-		count    int
+		readSum     float64
+		writeSum    float64
+		readMax     float64
+		writeMax    float64
+		latencySum  float64
+		latencyMin  float64
+		count       int
 	})
 	for _, r := range successResults {
 		mode := r.Config.Mode
@@ -1014,6 +1069,18 @@ func printExperimentAnalysis(results []ExperimentResult) {
 		s := modeStats[mode]
 		s.readSum += r.ReadThroughput
 		s.writeSum += r.WriteThroughput
+		s.latencySum += r.LatP99
+
+		if s.count == 0 || r.ReadThroughput > s.readMax {
+			s.readMax = r.ReadThroughput
+		}
+		if s.count == 0 || r.WriteThroughput > s.writeMax {
+			s.writeMax = r.WriteThroughput
+		}
+		if s.count == 0 || r.LatP99 < s.latencyMin {
+			s.latencyMin = r.LatP99
+		}
+
 		s.count++
 		modeStats[mode] = s
 	}
@@ -1029,9 +1096,132 @@ func printExperimentAnalysis(results []ExperimentResult) {
 		if stats.count > 0 {
 			avgRead := stats.readSum / float64(stats.count)
 			avgWrite := stats.writeSum / float64(stats.count)
-			fmt.Printf("  %-8s: Read: %s/s, Write: %s/s (across %d configs)\n", m, formatNumber(avgRead), formatNumber(avgWrite), stats.count)
+			avgLatency := stats.latencySum / float64(stats.count)
+			fmt.Printf("│ %-12s (%d configs)\n", m, stats.count)
+			fmt.Printf("│   Avg Throughput:  Read: %s/s, Write: %s/s\n", formatNumber(avgRead), formatNumber(avgWrite))
+			fmt.Printf("│   Max Throughput:  Read: %s/s, Write: %s/s\n", formatNumber(stats.readMax), formatNumber(stats.writeMax))
+			fmt.Printf("│   Latency:         Avg P99: %.2f ms, Min P99: %.2f ms\n", avgLatency, stats.latencyMin)
+			fmt.Println("│")
 		}
 	}
+	fmt.Println("└──────────────────────────────────────────────────────────────────────────────────┘")
+
+	// 6. CONCURRENCY ANALYSIS (Direct mode only)
+	fmt.Println("\n┌─ Concurrency Impact (Direct Mode) ───────────────────────────────────────────────┐")
+	var directResults []ExperimentResult
+	for _, r := range successResults {
+		if r.Config.Mode == "direct" || r.Config.Mode == "" {
+			directResults = append(directResults, r)
+		}
+	}
+
+	// Group by concurrency
+	concurrencyGroups := make(map[int][]ExperimentResult)
+	for _, r := range directResults {
+		concurrencyGroups[r.Config.Concurrency] = append(concurrencyGroups[r.Config.Concurrency], r)
+	}
+
+	// Get sorted concurrency levels
+	var concLevels []int
+	for conc := range concurrencyGroups {
+		concLevels = append(concLevels, conc)
+	}
+	sort.Ints(concLevels)
+
+	if len(concLevels) > 0 {
+		fmt.Println("│ Concurrency │ Avg Read Tput │ Avg Write Tput │ Avg P99 Latency │ # Configs │")
+		fmt.Println("│─────────────┼───────────────┼────────────────┼─────────────────┼───────────│")
+		for _, conc := range concLevels {
+			results := concurrencyGroups[conc]
+			var readSum, writeSum, latSum float64
+			for _, r := range results {
+				readSum += r.ReadThroughput
+				writeSum += r.WriteThroughput
+				latSum += r.LatP99
+			}
+			count := len(results)
+			fmt.Printf("│ %-11d │ %-13s │ %-14s │ %-15.2f │ %-9d │\n",
+				conc,
+				formatNumber(readSum/float64(count)),
+				formatNumber(writeSum/float64(count)),
+				latSum/float64(count),
+				count)
+		}
+	} else {
+		fmt.Println("│ No direct mode results with varying concurrency levels")
+	}
+	fmt.Println("└──────────────────────────────────────────────────────────────────────────────────┘")
+
+	// 7. BATCH SIZE ANALYSIS
+	fmt.Println("\n┌─ Batch Size Impact Analysis ─────────────────────────────────────────────────────┐")
+	batchGroups := make(map[int][]ExperimentResult)
+	for _, r := range successResults {
+		batchGroups[r.Config.BatchSize] = append(batchGroups[r.Config.BatchSize], r)
+	}
+
+	var batchSizes []int
+	for batch := range batchGroups {
+		batchSizes = append(batchSizes, batch)
+	}
+	sort.Ints(batchSizes)
+
+	if len(batchSizes) > 0 {
+		fmt.Println("│ Batch Size │ Avg Read Tput │ Avg Write Tput │ Avg P99 Latency │ # Configs │")
+		fmt.Println("│────────────┼───────────────┼────────────────┼─────────────────┼───────────│")
+		for _, batch := range batchSizes {
+			results := batchGroups[batch]
+			var readSum, writeSum, latSum float64
+			for _, r := range results {
+				readSum += r.ReadThroughput
+				writeSum += r.WriteThroughput
+				latSum += r.LatP99
+			}
+			count := len(results)
+			fmt.Printf("│ %-10d │ %-13s │ %-14s │ %-15.2f │ %-9d │\n",
+				batch,
+				formatNumber(readSum/float64(count)),
+				formatNumber(writeSum/float64(count)),
+				latSum/float64(count),
+				count)
+		}
+	}
+	fmt.Println("└──────────────────────────────────────────────────────────────────────────────────┘")
+
+	// 8. RECOMMENDATIONS
+	fmt.Println("\n┌─ Recommendations ────────────────────────────────────────────────────────────────┐")
+	if len(topReadResults) > 0 {
+		fmt.Printf("│ • For maximum read throughput:  %s (%s)\n",
+			topReadResults[0].Config.Name, topReadResults[0].Config.Mode)
+	}
+	if len(topWriteResults) > 0 {
+		fmt.Printf("│ • For maximum write throughput: %s (%s)\n",
+			topWriteResults[0].Config.Name, topWriteResults[0].Config.Mode)
+	}
+	if len(lowLatResults) > 0 {
+		fmt.Printf("│ • For lowest latency:           %s (%s)\n",
+			lowLatResults[0].Config.Name, lowLatResults[0].Config.Mode)
+	}
+	if len(balanced) > 0 {
+		fmt.Printf("│ • For balanced performance:     %s (%s)\n",
+			balanced[0].result.Config.Name, balanced[0].result.Config.Mode)
+	}
+
+	// Production recommendation
+	fmt.Println("│")
+	fmt.Println("│ Production Guidance:")
+	if len(lowLatResults) > 0 && lowLatResults[0].LatP99 < 5.0 {
+		fmt.Printf("│   - Low-latency apps: Use %s (P99: %.2f ms)\n",
+			lowLatResults[0].Config.Name, lowLatResults[0].LatP99)
+	}
+	if len(topReadResults) > 0 {
+		fmt.Printf("│   - Read-heavy workloads: Use %s (%.1fM reads/s)\n",
+			topReadResults[0].Config.Name, topReadResults[0].ReadThroughput/1e6)
+	}
+	if len(balanced) > 0 {
+		fmt.Printf("│   - Mixed workloads: Use %s (best throughput/latency ratio)\n",
+			balanced[0].result.Config.Name)
+	}
+	fmt.Println("└──────────────────────────────────────────────────────────────────────────────────┘")
 }
 
 type LatencyStats struct {

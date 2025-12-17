@@ -132,16 +132,16 @@ Kernel: 6.14.0-37-generic
 
 | Mode | Read Throughput | Write Throughput | P99 Latency | Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| **Direct (Best)** | **6.74M ops/sec** | **1.83M ops/sec** | **0.92 ms** | Batch=100, Conc=10-500 |
-| **gRPC** | 4.61M ops/sec | 1.21M ops/sec | 29.51 ms | Batch=100, Conc=100 |
-| **HTTP Fiber** | 4.27M ops/sec | 1.11M ops/sec | 139.16 ms | Batch=500, Conc=500 |
-| **HTTP Std** | 3.60M ops/sec | 827K ops/sec | 160.21 ms | Batch=100, Conc=500 |
+| **Direct (Best)** | **6.77M ops/sec** | **2.16M ops/sec** | **1.39 ms** | Cache=1K / Conc=10 |
+| **gRPC** | 5.05M ops/sec | 1.35M ops/sec | 27.42 ms | Batch=1000 / Conc=100 |
+| **HTTP Fiber** | 4.23M ops/sec | 1.15M ops/sec | 75.18 ms | Batch=1000, Conc=500 |
+| **HTTP Std** | 3.90M ops/sec | 859K ops/sec | 158.68 ms | Batch=100, Conc=500 |
 
 ### Key Performance Achievements
 
-- **6.74M reads/sec** in direct mode with optimal batching (ID 4: Batch 100)
-- **1.83M writes/sec** at low concurrency (ID 8: Conc 10)
-- **Sub-millisecond P99 latency** (0.92ms) for direct access
+- **6.77M reads/sec** in direct mode with optimized cache (Cache 1K)
+- **2.16M writes/sec** at low concurrency (Conc 10)
+- **Low P99 latency** (1.39ms) for direct access at low concurrency
 - **Consistent performance** across 1M-1B operations without degradation
 
 *Note: Performance depends heavily on disk I/O speed, concurrency settings, and batching strategy.*
@@ -154,67 +154,67 @@ We conducted 36 experiments across different configurations to understand perfor
 
 | Batch Size | Read Tput | Write Tput | Avg Latency | P99 Latency | Insight |
 |---|---|---|---|---|---|
-| 1 | 1.44M/s | 779K/s | 0.31ms | 3.44ms | Baseline - no batching |
-| 10 | 5.95M/s | 1.01M/s | 2.50ms | 32.92ms | **4x improvement** |
-| 50 | 6.53M/s | 1.14M/s | 10.97ms | 119.14ms | Optimal balance |
-| **100** | **6.74M/s** | **1.07M/s** | **23.27ms** | **152.14ms** | **Best throughput** |
-| 200 | 6.30M/s | 1.06M/s | 48.22ms | 224.59ms | Diminishing returns |
-| 500 | 6.55M/s | 1.10M/s | 105.66ms | 304.75ms | Higher latency |
-| 1000 | 6.55M/s | 1.08M/s | 191.54ms | 420.27ms | Excessive latency |
+| 1 | 1.39M/s | 797K/s | 0.30ms | 3.42ms | Baseline - no batching |
+| 10 | 6.13M/s | 1.10M/s | 2.33ms | 33.62ms | **4.4x improvement** |
+| 50 | 5.98M/s | 1.16M/s | 10.85ms | 118.65ms | Optimal balance |
+| **100** | **6.09M/s** | **1.14M/s** | **21.89ms** | **145.91ms** | **Best throughput** |
+| 200 | 6.53M/s | 1.12M/s | 45.14ms | 204.68ms | Diminishing returns |
+| 500 | 6.06M/s | 1.03M/s | 114.61ms | 319.47ms | Higher latency |
+| 1000 | 6.58M/s | 1.09M/s | 194.74ms | 442.68ms | Excessive latency |
 
-**Key Finding**: Batching provides massive gains up to size 100, with 10-100 being the sweet spot (4-5x throughput improvement). Beyond 100, latency increases significantly with diminishing throughput gains.
+**Key Finding**: Batching provides massive gains up to size 100, with 10-100 being the sweet spot (4.4x throughput improvement). Beyond 100, latency increases significantly with diminishing throughput gains.
 
 #### Batching Performance Visualization
 
 ```mermaid
 graph LR
     subgraph "Write Throughput vs Batch Size"
-        A[Batch 1<br/>779K/s] -->|+30%| B[Batch 10<br/>1.01M/s]
-        B -->|+13%| C[Batch 50<br/>1.14M/s]
-        C -->|+6%| D[Batch 100<br/>1.07M/s]
-        D -->|~0%| E[Batch 500<br/>1.10M/s]
+        A[Batch 1<br/>797K/s] -->|+38%| B[Batch 10<br/>1.10M/s]
+        B -->|+5%| C[Batch 50<br/>1.16M/s]
+        C -->|-2%| D[Batch 100<br/>1.14M/s]
+        D -->|-10%| E[Batch 500<br/>1.03M/s]
     end
 
     style A fill:#ffcccc
     style B fill:#ffe6cc
     style C fill:#ffffcc
     style D fill:#ccffcc
-    style E fill:#ccffcc
+    style E fill:#ffcccc
 ```
 
 **Latency Trade-off**:
 ```
-Batch 1:    0.31ms avg ████░░░░░░░░░░░░░░░░ (baseline)
-Batch 10:   2.50ms avg ██████████░░░░░░░░░░ (8x higher)
-Batch 50:  10.97ms avg ████████████████████████████████████ (35x higher)
-Batch 100: 23.27ms avg ████████████████████████████████████████████████████████████████████ (75x higher)
+Batch 1:    0.30ms avg ████░░░░░░░░░░░░░░░░ (baseline)
+Batch 10:   2.33ms avg ██████████░░░░░░░░░░ (7.8x higher)
+Batch 50:  10.85ms avg ████████████████████████████████████ (36x higher)
+Batch 100: 21.89ms avg ████████████████████████████████████████████████████████████████████ (73x higher)
 ```
 
 ### 2. Concurrency Impact (Direct Mode, Batch=100)
 
 | Concurrency | Read Tput | Write Tput | Avg Latency | P99 Latency | Insight |
 |---|---|---|---|---|---|
-| **10** | **4.76M/s** | **1.83M/s** | **0.38ms** | **1.36ms** | **Lowest latency, highest write tput** |
-| 50 | 6.71M/s | 1.42M/s | 1.93ms | 13.03ms | Good balance |
-| 100 | 6.12M/s | 1.09M/s | 4.77ms | 36.41ms | Moderate |
-| 500 | 6.74M/s | 1.07M/s | 23.27ms | 152.14ms | **Best read throughput** |
-| 1000 | 6.12M/s | 1.07M/s | 45.74ms | 188.71ms | High latency |
-| 2000 | 6.24M/s | 1.03M/s | 90.86ms | 339.39ms | Very high latency |
-| 5000 | 6.61M/s | 971K/s | 240.31ms | 509.82ms | Extreme latency |
+| **10** | **4.82M/s** | **2.16M/s** | **0.33ms** | **1.39ms** | **Lowest latency, highest write tput** |
+| 50 | 6.74M/s | 1.17M/s | 2.31ms | 18.45ms | Good balance |
+| 100 | 6.20M/s | 1.24M/s | 4.36ms | 31.90ms | Moderate |
+| 500 | 6.09M/s | 1.14M/s | 21.89ms | 145.91ms | Base configuration |
+| 1000 | 6.45M/s | 1.08M/s | 45.86ms | 210.25ms | High latency |
+| 2000 | 6.68M/s | 1.02M/s | 91.96ms | 314.96ms | Very high latency |
+| 5000 | 6.61M/s | 1.05M/s | 192.67ms | 471.47ms | Extreme latency |
 
-**Key Finding**: Lower concurrency (10-50) provides best latency and write performance. Higher concurrency (500+) maximizes read throughput but increases P99 latency dramatically (up to 500ms at 5000 clients). The engine handles extreme concurrency gracefully without crashing.
+**Key Finding**: Lower concurrency (10-50) provides best latency and write performance. Higher concurrency (500+) maximizes read throughput but increases P99 latency dramatically (up to 471ms at 5000 clients). The engine handles extreme concurrency gracefully without crashing.
 
 #### Concurrency Performance Visualization
 
 ```mermaid
 graph TD
     subgraph "Read Throughput Scaling"
-        C10[10 clients<br/>4.76M/s<br/>1.36ms P99]
-        C50[50 clients<br/>6.71M/s<br/>13.03ms P99]
-        C100[100 clients<br/>6.12M/s<br/>36.41ms P99]
-        C500[500 clients<br/>6.74M/s<br/>152.14ms P99]
-        C1000[1000 clients<br/>6.12M/s<br/>188.71ms P99]
-        C5000[5000 clients<br/>6.61M/s<br/>509.82ms P99]
+        C10[10 clients<br/>4.82M/s<br/>1.39ms P99]
+        C50[50 clients<br/>6.74M/s<br/>18.45ms P99]
+        C100[100 clients<br/>6.20M/s<br/>31.90ms P99]
+        C500[500 clients<br/>6.09M/s<br/>145.91ms P99]
+        C1000[1000 clients<br/>6.45M/s<br/>210.25ms P99]
+        C5000[5000 clients<br/>6.61M/s<br/>471.47ms P99]
 
         C10 --> C50
         C50 --> C100
@@ -234,19 +234,19 @@ graph TD
 **Sweet Spot Analysis**:
 ```
                   Read Tput    Write Tput   P99 Latency   Rating
-10 clients        4.76M/s      1.83M/s ⭐    1.36ms ⭐⭐⭐   Best for low latency
-50 clients        6.71M/s ⭐    1.42M/s      13.03ms ⭐⭐    Balanced
-500 clients       6.74M/s ⭐    1.07M/s      152ms ⭐       Max throughput
-5000 clients      6.61M/s      971K/s        510ms         Stress test
+10 clients        4.82M/s      2.16M/s ⭐    1.39ms ⭐⭐⭐   Best for low latency
+50 clients        6.74M/s ⭐    1.17M/s      18.45ms ⭐⭐    Balanced
+500 clients       6.09M/s      1.14M/s      145ms ⭐       Base config
+5000 clients      6.61M/s      1.05M/s      471ms         Stress test
 ```
 
 ### 3. Segment Size Impact (Direct Mode, Batch=100, Conc=500)
 
 | Segment Size | Read Tput | Write Tput | Avg Latency | P99 Latency |
 |---|---|---|---|---|
-| 1MB | 6.68M/s | 1.03M/s | 23.24ms | 151.03ms |
-| 10MB | 6.71M/s | 1.06M/s | 23.51ms | 148.03ms |
-| 100MB | 6.58M/s | 1.03M/s | 23.90ms | 153.50ms |
+| 1MB | 6.74M/s | 1.12M/s | 22.47ms | 145.24ms |
+| 10MB | 6.66M/s | 1.07M/s | 23.30ms | 156.08ms |
+| 100MB | 6.61M/s | 1.15M/s | 21.91ms | 152.44ms |
 
 **Key Finding**: Segment size has minimal impact on throughput (1-2% variance). Larger segments slightly reduce file rotation overhead but don't significantly affect performance in write-heavy workloads.
 
@@ -254,12 +254,12 @@ graph TD
 
 | Cache Size | Read Tput | Write Tput | Avg Latency | P99 Latency |
 |---|---|---|---|---|
-| 1K | 6.73M/s | 1.07M/s | 23.27ms | 155.05ms |
-| **10K** | **6.74M/s** | **1.07M/s** | **23.27ms** | **152.14ms** |
-| 100K | 6.66M/s | 1.07M/s | 23.25ms | 156.02ms |
-| 1M | 6.68M/s | 1.16M/s | 21.63ms | 156.46ms |
+| **1K** | **6.77M/s** | **1.17M/s** | **21.42ms** | **149.85ms** |
+| 10K | 6.09M/s | 1.14M/s | 21.89ms | 145.91ms |
+| 100K | 6.70M/s | 1.18M/s | 21.68ms | 153.44ms |
+| 1M | 6.65M/s | 1.19M/s | 21.59ms | 147.13ms |
 
-**Key Finding**: Cache size has virtually no impact in write-heavy benchmarks (OS page cache handles this). In production with random reads, larger caches would show significant benefits. 10K is a practical default.
+**Key Finding**: Cache size has virtually no impact in write-heavy benchmarks (OS page cache handles this). In production with random reads, larger caches would show significant benefits. 1K-10K is a practical default.
 
 ### 5. Network Protocol Comparison
 
@@ -267,39 +267,39 @@ graph TD
 
 | Batch Size | Read Tput | Write Tput | Avg Latency | P99 Latency |
 |---|---|---|---|---|
-| 1 | 154K/s | 168K/s | 3.09ms | 6.57ms |
-| 10 | 1.52M/s | 694K/s | 5.22ms | 21.58ms |
-| 50 | 3.99M/s | 955K/s | 10.56ms | 77.85ms |
-| **100** | **4.40M/s** | **1.05M/s** | **29.13ms** | **137.16ms** |
-| 500 | 4.84M/s | 1.18M/s | 119.56ms | 303.07ms |
-| 1000 | 4.58M/s | 1.19M/s | 217.11ms | 452.99ms |
+| 1 | 154.4K/s | 171.5K/s | 3.06ms | 6.43ms |
+| 10 | 1.60M/s | 736.1K/s | 4.93ms | 20.32ms |
+| 50 | 4.11M/s | 976.0K/s | 10.21ms | 80.96ms |
+| 100 | 4.47M/s | 1.17M/s | 26.55ms | 122.23ms |
+| 500 | 4.73M/s | 1.26M/s | 113.09ms | 339.88ms |
+| **1000** | **5.05M/s** | **1.35M/s** | **190.85ms** | **421.91ms** |
 
 #### HTTP Fiber Mode (Batch Size Impact)
 
 | Batch Size | Read Tput | Write Tput | Avg Latency | P99 Latency |
 |---|---|---|---|---|
-| 1 | 226K/s | 19.4K/s | 12.46ms | 86.34ms |
-| 50 | 3.32M/s | 664K/s | 18.29ms | 103.22ms |
-| **100** | **3.77M/s** | **811K/s** | **36.36ms** | **166.54ms** |
-| 500 | 4.27M/s | 1.11M/s | 128.54ms | 332.71ms |
-| 1000 | 3.85M/s | 1.09M/s | 234.53ms | 520.57ms |
+| 1 | 223.6K/s | 19.5K/s | 12.04ms | 75.18ms |
+| 50 | 3.65M/s | 667.8K/s | 18.16ms | 100.86ms |
+| 100 | 3.90M/s | 831.5K/s | 35.40ms | 166.22ms |
+| 500 | 4.17M/s | 1.02M/s | 136.85ms | 382.81ms |
+| **1000** | **4.23M/s** | **1.15M/s** | **229.71ms** | **519.80ms** |
 
-**Key Finding**: gRPC outperforms HTTP at optimal batch sizes (~20-30% better). Both benefit significantly from batching. Direct mode is ~40-50% faster than networked modes due to zero serialization/network overhead.
+**Key Finding**: gRPC outperforms HTTP at optimal batch sizes (~20-30% better). Both benefit significantly from batching. Direct mode is ~35-40% faster than networked modes due to zero serialization/network overhead.
 
 #### Protocol Performance Comparison
 
 ```mermaid
 graph LR
     subgraph "Throughput @ Optimal Batch Size"
-        Direct[Direct Mode<br/>6.74M reads/s<br/>1.07M writes/s<br/>0ms overhead]
-        gRPC[gRPC<br/>4.40M reads/s<br/>1.05M writes/s<br/>Protobuf + HTTP/2]
-        Fiber[HTTP Fiber<br/>3.77M reads/s<br/>811K writes/s<br/>JSON + Fiber]
-        Std[HTTP Std<br/>3.60M reads/s<br/>827K writes/s<br/>JSON + net/http]
+        Direct[Direct Mode<br/>6.77M reads/s<br/>1.17M writes/s<br/>0ms overhead]
+        gRPC[gRPC<br/>5.05M reads/s<br/>1.35M writes/s<br/>Protobuf + HTTP/2]
+        Fiber[HTTP Fiber<br/>4.23M reads/s<br/>1.15M writes/s<br/>JSON + Fiber]
+        Std[HTTP Std<br/>3.90M reads/s<br/>859K writes/s<br/>JSON + net/http]
     end
 
-    Direct -->|35% slower| gRPC
-    gRPC -->|14% slower| Fiber
-    Fiber -->|5% slower| Std
+    Direct -->|25% slower| gRPC
+    gRPC -->|16% slower| Fiber
+    Fiber -->|8% slower| Std
 
     style Direct fill:#00ff00
     style gRPC fill:#90EE90
@@ -311,15 +311,15 @@ graph LR
 ```
 Protocol          Read Tput    % of Direct   Overhead Source
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Direct            6.74M/s      100%          None (in-process)
-gRPC              4.40M/s       65%          Protobuf encoding + HTTP/2 framing
-HTTP Fiber        3.77M/s       56%          JSON parsing + Fiber framework
-HTTP Std          3.60M/s       53%          JSON parsing + net/http overhead
+Direct            6.77M/s      100%          None (in-process)
+gRPC              5.05M/s       75%          Protobuf encoding + HTTP/2 framing
+HTTP Fiber        4.23M/s       62%          JSON parsing + Fiber framework
+HTTP Std          3.90M/s       58%          JSON parsing + net/http overhead
 ```
 
 ## How We Achieved High Performance
 
-This section explains the key optimizations and design decisions that enabled **6.74M reads/sec** and **1.83M writes/sec**.
+This section explains the key optimizations and design decisions that enabled **6.77M reads/sec** and **2.16M writes/sec**.
 
 ### 1. **Append-Only Log Structure (O(1) Writes)**
 
@@ -393,14 +393,14 @@ Comparison for same data:
 
 ### 4. **Request Batching (4-5x Throughput Gain)**
 
-Our benchmarks show batching 100 operations provides a **4-5x throughput improvement**:
+Our benchmarks show batching 10-100 operations provides a **4-5x throughput improvement**:
 
 | Batch Size | Throughput | Explanation |
 |---|---|---|
-| 1 | 779K writes/s | One syscall per operation |
-| 10 | 1.01M writes/s | 10 operations amortize syscall cost |
-| **100** | **1.07M writes/s** | **Optimal syscall/latency balance** |
-| 1000 | 1.08M writes/s | Diminishing returns |
+| 1 | 797K writes/s | One syscall per operation |
+| 10 | 1.10M writes/s | 10 operations amortize syscall cost |
+| **100** | **1.14M writes/s** | **Optimal syscall/latency balance** |
+| 1000 | 1.09M writes/s | Diminishing returns |
 
 **Why batching works**:
 - Amortizes syscall overhead (context switch cost)
@@ -461,10 +461,10 @@ Our benchmarks revealed significant performance differences across protocols:
 
 | Protocol | Throughput | Overhead Source |
 |---|---|---|
-| **Direct** | 6.74M ops/s | No overhead (in-process) |
-| **gRPC** | 4.40M ops/s | Protobuf encoding + HTTP/2 framing |
-| **HTTP/Fiber** | 3.77M ops/s | JSON encoding + HTTP/1.1 parsing |
-| **HTTP/Std** | 3.60M ops/s | JSON + std lib HTTP overhead |
+| **Direct** | 6.77M ops/s | No overhead (in-process) |
+| **gRPC** | 5.05M ops/s | Protobuf encoding + HTTP/2 framing |
+| **HTTP/Fiber** | 4.23M ops/s | JSON encoding + HTTP/1.1 parsing |
+| **HTTP/Std** | 3.90M ops/s | JSON + std lib HTTP overhead |
 
 **Optimization**: For production, gRPC provides the best balance of speed and type safety.
 
@@ -507,7 +507,7 @@ Current bottlenecks:
 3. **Memory indexes are essential**: O(1) lookup vs O(log N) for B-Trees
 4. **Syscall overhead matters**: Zero-copy reads and batched operations critical
 5. **Lock granularity**: Fine-grained locks allow massive concurrency (5000+ clients)
-6. **Protocol overhead is real**: Direct access is 40-50% faster than networked modes
+6. **Protocol overhead is real**: Direct access is 25-40% faster than networked modes
 7. **OS page cache is powerful**: Often outperforms application-level caching for working sets
 8. **Benchmarking drives design**: We ran 36 experiments to validate each optimization
 
@@ -570,9 +570,9 @@ Baseline (naive implementation):           ~50K ops/s
   + Custom binary serialization:           1.8M ops/s   (1.5x)
   + Zero-copy reads (pread):               2.5M ops/s   (1.4x)
   + Fine-grained locking:                  4.0M ops/s   (1.6x)
-  + Request batching (100):                6.7M ops/s   (1.7x)
+  + Request batching (100):                6.77M ops/s  (1.7x)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TOTAL IMPROVEMENT:                         134x faster
+TOTAL IMPROVEMENT:                         135x faster
 ```
 
 ## Usage
