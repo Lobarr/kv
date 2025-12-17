@@ -118,7 +118,15 @@ sequenceDiagram
 
 ## Performance
 
-*Benchmarks run on a local development machine (Linux, NVMe).*
+*Benchmarks run on a local development machine with the following specifications:*
+
+```
+OS:     Ubuntu 24.04.3 LTS x86_64
+CPU:    AMD Ryzen 9 7900X (24 cores) @ 5.737GHz
+Memory: 63 GB DDR5
+Disk:   NVMe SSD
+Kernel: 6.14.0-37-generic
+```
 
 ### Performance Summary
 
