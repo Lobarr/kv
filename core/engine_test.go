@@ -318,16 +318,16 @@ func TestSet(t *testing.T) {
 
 	key := randomStringBetween(10, 20)
 	value := randomString(1000)
-	initialSegmentEntriesCount := engine.segment.entriesCount
+	initialSegmentEntriesCount := engine.segment.entriesCount.Load()
 
 	if err = engine.Set(key, value); err != nil {
 		t.Fatal(err)
 	}
 
 	// ensure entry go added to current segment
-	if engine.segment.entriesCount != initialSegmentEntriesCount+1 {
+	if engine.segment.entriesCount.Load() != initialSegmentEntriesCount+1 {
 		t.Errorf("expected entries_count=%d but got %d",
-			initialSegmentEntriesCount+1, engine.segment.entriesCount)
+			initialSegmentEntriesCount+1, engine.segment.entriesCount.Load())
 	}
 
 	// ensure the context needed to read the key is set in memory
@@ -384,5 +384,62 @@ func TestSegmentCompaction(t *testing.T) {
 		if value != values[i] {
 			t.Errorf("expected value %v, got %v", values[i], value)
 		}
+	}
+}
+
+func TestConcurrentReadAfterWrite(t *testing.T) {
+	// Use small segment size to force frequent rollovers
+	// CacheSize small to force disk loads (though not strictly necessary for this race)
+	config := &EngineConfig{
+		SegmentMaxSize:             5, // Very small to trigger rollovers constantly
+		SnapshotInterval:           10 * time.Second,
+		TolerableSnapshotFailCount: 5,
+		CacheSize:                  10,
+		CompactorInterval:          10 * time.Second,
+		CompactorWorkerCount:       10,
+		SnapshotTTLDuration:        10 * time.Second,
+		DataPath:                   t.TempDir(),
+		ShouldCompact:              false,
+	}
+
+	engine, err := NewEngine(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+
+	workers := 50
+	writesPerWorker := 50
+
+	var g errgroup.Group
+	g.SetLimit(workers)
+
+	for i := 0; i < workers; i++ {
+		i := i
+		g.Go(func() error {
+			for j := 0; j < writesPerWorker; j++ {
+				// Random key/value
+				key := fmt.Sprintf("key-%d-%d-%d", i, j, rand.Int())
+				value := fmt.Sprintf("value-%d-%d", i, j)
+
+				if err := engine.Set(key, value); err != nil {
+					return err
+				}
+
+				// Immediate read back
+				readVal, err := engine.Get(key)
+				if err != nil {
+					return fmt.Errorf("failed to get key %s: %v", key, err)
+				}
+				if readVal != value {
+					return fmt.Errorf("data corruption for key %s: expected %s, got %s", key, value, readVal)
+				}
+			}
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		t.Fatal(err)
 	}
 }

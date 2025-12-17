@@ -1,7 +1,6 @@
 package core
 
 import (
-	"container/heap"
 	"errors"
 	"sync"
 	"time"
@@ -37,63 +36,27 @@ func init() {
 	prometheus.Register(SegmentMetadataListSize)
 }
 
-type SegmentMetadata struct {
-	segmentID string // id of data segment
-	createdAt int64  // timestamp of when metadata was created
-	index     int    // index of item in the heap
-}
-
 var ErrSegmentIdNotFound = errors.New("unable to find segment id")
 
 type SegmentMetadataList struct {
-	mu                  sync.RWMutex
-	segmentMetadataHeap []*SegmentMetadata
-	segmentIDByIndex    map[string]int // mapping of segment id to index position in the segment metadata heap
+	mu       sync.RWMutex
+	segments map[string]int64 // segmentID -> createdAt timestamp
 }
 
 func (s *SegmentMetadataList) Len() int {
-	return len(s.segmentMetadataHeap)
-}
-
-func (s *SegmentMetadataList) Less(x, y int) bool {
-	return s.segmentMetadataHeap[x].createdAt > s.segmentMetadataHeap[y].createdAt
-}
-
-func (s *SegmentMetadataList) Swap(x, y int) {
-	s.segmentMetadataHeap[x], s.segmentMetadataHeap[y] = s.segmentMetadataHeap[y], s.segmentMetadataHeap[x]
-	s.segmentMetadataHeap[x].index = x
-	s.segmentMetadataHeap[y].index = y
-	s.segmentIDByIndex[s.segmentMetadataHeap[x].segmentID] = x
-	s.segmentIDByIndex[s.segmentMetadataHeap[y].segmentID] = y
-}
-
-func (s *SegmentMetadataList) Push(ctx any) {
-	index := len(s.segmentMetadataHeap)
-	segmentMetadata := ctx.(*SegmentMetadata)
-	segmentMetadata.index = index
-	s.segmentMetadataHeap = append(s.segmentMetadataHeap, segmentMetadata)
-	s.segmentIDByIndex[segmentMetadata.segmentID] = segmentMetadata.index
-}
-
-func (s *SegmentMetadataList) Pop() any {
-	prevsegmentMetadataHeap := s.segmentMetadataHeap
-	n := len(prevsegmentMetadataHeap)
-	segmentMetadata := prevsegmentMetadataHeap[n-1]
-	prevsegmentMetadataHeap[n-1] = nil // avoid memory leak
-	segmentMetadata.index = -1         // for safety
-	s.segmentMetadataHeap = prevsegmentMetadataHeap[0 : n-1]
-	delete(s.segmentIDByIndex, segmentMetadata.segmentID)
-	return segmentMetadata
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.segments)
 }
 
 func (s *SegmentMetadataList) GetSegmentIDs() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	segmentIDs := make([]string, len(s.segmentMetadataHeap))
+	segmentIDs := make([]string, 0, len(s.segments))
 
-	for i, segmentMetadata := range s.segmentMetadataHeap {
-		segmentIDs[i] = segmentMetadata.segmentID
+	for segmentID := range s.segments {
+		segmentIDs = append(segmentIDs, segmentID)
 	}
 
 	return segmentIDs
@@ -112,8 +75,7 @@ func (s *SegmentMetadataList) Add(segmentID string) {
 		SegmentMetadataListSize.Inc()
 	}()
 
-	segmentMetadata := &SegmentMetadata{segmentID: segmentID, createdAt: time.Now().Unix()}
-	heap.Push(s, segmentMetadata)
+	s.segments[segmentID] = time.Now().Unix()
 }
 
 func (s *SegmentMetadataList) Remove(segmentID string) error {
@@ -129,26 +91,17 @@ func (s *SegmentMetadataList) Remove(segmentID string) error {
 		SegmentMetadataListSize.Dec()
 	}()
 
-	index, ok := s.segmentIDByIndex[segmentID]
-
-	if !ok {
+	if _, ok := s.segments[segmentID]; !ok {
 		return ErrSegmentIdNotFound
 	}
 
-	heap.Remove(s, index)
-	delete(s.segmentIDByIndex, segmentID)
+	delete(s.segments, segmentID)
 
 	return nil
 }
 
 func NewSegmentMetadataList() *SegmentMetadataList {
-	segmentMetadataHeap := new([]*SegmentMetadata)
-	segmentMetadataList := &SegmentMetadataList{
-		segmentMetadataHeap: *segmentMetadataHeap,
-		segmentIDByIndex:    make(map[string]int),
+	return &SegmentMetadataList{
+		segments: make(map[string]int64),
 	}
-
-	heap.Init(segmentMetadataList)
-
-	return segmentMetadataList
 }

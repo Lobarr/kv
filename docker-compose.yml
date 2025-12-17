@@ -1,0 +1,71 @@
+
+
+services:
+  kv-server-fiber:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["./bin/kv", "--http-server-type=fiber"]
+    ports:
+      - "8888:8080"
+      - "8081:8081"
+    networks:
+      - kv-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 1s
+      timeout: 1s
+      retries: 10
+
+  kv-server-std:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["./bin/kv", "--http-server-type=std"]
+    ports:
+      - "8889:8080"
+      - "8083:8081"
+    networks:
+      - kv-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 1s
+      timeout: 1s
+      retries: 10
+
+  benchmark-http-fiber:
+    build:
+      context: .
+      dockerfile: Dockerfile.benchmark
+    depends_on:
+      kv-server-fiber:
+        condition: service_healthy
+    command: ["--mode=http", "--base_url=http://kv-server-fiber:8080", "--num_requests=1000000", "--concurrency=500", "--batch_size=100"]
+    networks:
+      - kv-network
+
+  benchmark-http-std:
+    build:
+      context: .
+      dockerfile: Dockerfile.benchmark
+    depends_on:
+      kv-server-std:
+        condition: service_healthy
+    command: ["--mode=http", "--base_url=http://kv-server-std:8080", "--num_requests=1000000", "--concurrency=500", "--batch_size=100"]
+    networks:
+      - kv-network
+
+  benchmark-grpc:
+    build:
+      context: .
+      dockerfile: Dockerfile.benchmark
+    depends_on:
+      kv-server-fiber:
+        condition: service_healthy
+    command: ["--mode=grpc", "--grpc_addr=kv-server-fiber:8081", "--num_requests=1000000", "--concurrency=500", "--batch_size=100"]
+    networks:
+      - kv-network
+
+networks:
+  kv-network:
+    driver: bridge

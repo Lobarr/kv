@@ -1,7 +1,7 @@
 syntax = "proto3";
 package core;
 
-option go_package = "protos/";
+option go_package = "kv/protos";
 
 import "google/protobuf/timestamp.proto";
 
@@ -40,3 +40,52 @@ message LogEntryIndex {
   string segment_filename = 4;
 }
 
+message SetRequest {
+  string key = 1;
+  string value = 2;
+}
+
+message SetResponse {}
+
+message GetRequest {
+  string key = 1;
+}
+
+message GetResponse {
+  string value = 1;
+}
+
+message DeleteRequest {
+  string key = 1;
+}
+
+message DeleteResponse {}
+
+message BatchSetRequest {
+  repeated SetRequest requests = 1;
+}
+
+message BatchSetResponse {}
+
+message BatchGetRequest {
+  repeated GetRequest requests = 1;
+}
+
+message BatchGetResponse {
+  repeated GetResponse responses = 1;
+}
+
+message BatchDeleteRequest {
+  repeated DeleteRequest requests = 1;
+}
+
+message BatchDeleteResponse {}
+
+service KV {
+  rpc Set(SetRequest) returns (SetResponse);
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc BatchSet(BatchSetRequest) returns (BatchSetResponse);
+  rpc BatchGet(BatchGetRequest) returns (BatchGetResponse);
+  rpc BatchDelete(BatchDeleteRequest) returns (BatchDeleteResponse);
+}

@@ -20,15 +20,18 @@ func TestAddOperation(t *testing.T) {
 }
 
 func TestMultipleAddOperations(t *testing.T) {
-	expectedSegments := []string{"some-segment-1", "some-segment-2", "some-segment-3"}
+	expectedSegments := map[string]bool{"some-segment-1": true, "some-segment-2": true, "some-segment-3": true}
 	l := core.NewSegmentMetadataList()
-	for _, segment := range expectedSegments {
+	for segment := range expectedSegments {
 		l.Add(segment)
 	}
 	segments := l.GetSegmentIDs()
-	for i := 0; i < len(segments); i++ {
-		if segments[i] != expectedSegments[i] {
-			t.Errorf("expected %#v, got %#v", expectedSegments, segments)
+	if len(segments) != len(expectedSegments) {
+		t.Errorf("expected %d segments, got %d", len(expectedSegments), len(segments))
+	}
+	for _, segment := range segments {
+		if !expectedSegments[segment] {
+			t.Errorf("unexpected segment %s", segment)
 		}
 	}
 }

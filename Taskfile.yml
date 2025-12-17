@@ -1,0 +1,77 @@
+version: '3'
+
+tasks:
+  # ------------------------------------------------------------------
+  # Development
+  # ------------------------------------------------------------------
+  run:
+    desc: Start gRPC and HTTP servers for development (go run)
+    cmds:
+      - go run main.go
+
+  build:
+    desc: Build server binary
+    cmds:
+      - go build -o ./bin/kv
+
+  # ------------------------------------------------------------------
+  # Benchmarks (Docker)
+  # ------------------------------------------------------------------
+  bench:grpc:
+    desc: Run gRPC benchmark (Docker)
+    cmds:
+      - docker compose up --build -d kv-server-fiber
+      - docker compose up --build benchmark-grpc
+      - docker compose down
+
+  bench:http:fiber:
+    desc: Run HTTP (fiber) benchmark (Docker)
+    cmds:
+      - docker compose up --build -d kv-server-fiber
+      - docker compose up --build benchmark-http-fiber
+      - docker compose down
+
+  bench:http:std:
+    desc: Run HTTP (std) benchmark (Docker)
+    cmds:
+      - docker compose up --build -d kv-server-std
+      - docker compose up --build benchmark-http-std
+      - docker compose down
+
+  bench:all:
+    desc: Run all benchmarks (Docker)
+    aliases: [bench]
+    cmds:
+      - task: bench:grpc
+      - task: bench:http:fiber
+      - task: bench:http:std
+
+  bench:experiment:
+    desc: Run direct engine experiments
+    cmds:
+      - go build -o bin/benchmark benchmark/benchmark.go
+      - ./bin/benchmark --mode=experiment
+
+  # ------------------------------------------------------------------
+  # Quality Assurance
+  # ------------------------------------------------------------------
+  test:
+    desc: Run tests
+    cmds:
+      - go test ./core -v -bench=. -timeout 1h
+
+  test:race:
+    desc: Run tests with race detector
+    cmds:
+      - go test ./core -race -v -bench=. -timeout 1h
+
+  lint:
+    desc: Check code formatting
+    cmds:
+      - gofmt -d .
+
+  fmt:
+    desc: Fix code formatting
+    aliases: [lint:fix]
+    cmds:
+      - gofmt -d -w .
