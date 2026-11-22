@@ -39,11 +39,9 @@ func (s *HttpStdServer) batchSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, item := range req.Items {
-		if err := s.engine.Set(item.Key, item.Value); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+	if err := s.engine.BatchSet(req.Items); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -59,20 +57,17 @@ func (s *HttpStdServer) batchGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res := BatchGetResponse{}
+	values, err := s.engine.BatchGet(req.Keys)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	res := BatchGetResponse{Items: make([]KVItem, 0, len(values))}
 	for _, key := range req.Keys {
-		value, err := s.engine.Get(key)
-		if err != nil {
-			if err == ErrKeyNotFound {
-				continue
-			}
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+		if value, ok := values[key]; ok {
+			res.Items = append(res.Items, KVItem{Key: key, Value: value})
 		}
-		res.Items = append(res.Items, struct {
-			Key   string `json:"key"`
-			Value string `json:"value"`
-		}{Key: key, Value: value})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -86,11 +81,9 @@ func (s *HttpStdServer) batchDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, key := range req.Keys {
-		if err := s.engine.Delete(key); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+	if err := s.engine.BatchDelete(req.Keys); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -35,17 +35,11 @@ func (s *HttpServer) setupRoutes() {
 }
 
 type BatchSetRequest struct {
-	Items []struct {
-		Key   string `json:"key"`
-		Value string `json:"value"`
-	} `json:"items"`
+	Items []KVItem `json:"items"`
 }
 
 type BatchGetResponse struct {
-	Items []struct {
-		Key   string `json:"key"`
-		Value string `json:"value"`
-	} `json:"items"`
+	Items []KVItem `json:"items"`
 }
 
 type BatchDeleteRequest struct {
@@ -53,17 +47,14 @@ type BatchDeleteRequest struct {
 }
 
 func (s *HttpServer) batchSet(c *fiber.Ctx) error {
-	// s.engine.logger.Infof("received batch set request: %s", string(c.Body()))
 	var req BatchSetRequest
 	if err := c.BodyParser(&req); err != nil {
 		s.engine.logger.Errorf("error parsing batch set request: %v", err)
 		return err
 	}
 
-	for _, item := range req.Items {
-		if err := s.engine.Set(item.Key, item.Value); err != nil {
-			return err
-		}
+	if err := s.engine.BatchSet(req.Items); err != nil {
+		return err
 	}
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -77,36 +68,30 @@ func (s *HttpServer) batchGet(c *fiber.Ctx) error {
 		return err
 	}
 
-	res := BatchGetResponse{}
+	values, err := s.engine.BatchGet(req.Keys)
+	if err != nil {
+		return err
+	}
+
+	res := BatchGetResponse{Items: make([]KVItem, 0, len(values))}
 	for _, key := range req.Keys {
-		value, err := s.engine.Get(key)
-		if err != nil {
-			if err == ErrKeyNotFound {
-				continue
-			}
-			return err
+		if value, ok := values[key]; ok {
+			res.Items = append(res.Items, KVItem{Key: key, Value: value})
 		}
-		res.Items = append(res.Items, struct {
-			Key   string `json:"key"`
-			Value string `json:"value"`
-		}{Key: key, Value: value})
 	}
 
 	return c.JSON(res)
 }
 
 func (s *HttpServer) batchDelete(c *fiber.Ctx) error {
-	// s.engine.logger.Infof("received batch delete request: %s", string(c.Body()))
 	var req BatchDeleteRequest
 	if err := c.BodyParser(&req); err != nil {
 		s.engine.logger.Errorf("error parsing batch delete request: %v", err)
 		return err
 	}
 
-	for _, key := range req.Keys {
-		if err := s.engine.Delete(key); err != nil {
-			return err
-		}
+	if err := s.engine.BatchDelete(req.Keys); err != nil {
+		return err
 	}
 
 	return c.JSON(fiber.Map{"status": "ok"})

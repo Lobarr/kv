@@ -1013,3 +1013,87 @@ func TestSnapshotFilesAreAtomic(t *testing.T) {
 		t.Fatal("expected at least one snapshot file")
 	}
 }
+
+func TestBatchOperations(t *testing.T) {
+	cfg := getEngineConfig(t, false)
+	cfg.SegmentMaxSize = 25 // Force rollovers during batch writes
+	engine, err := NewEngine(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+
+	// Verify Engine satisfies the Store interface with batch methods.
+	var store Store = engine
+
+	items := make([]KVItem, 100)
+	keys := make([]string, 100)
+	for i := 0; i < 100; i++ {
+		keys[i] = fmt.Sprintf("batch-key-%03d", i)
+		items[i] = KVItem{Key: keys[i], Value: fmt.Sprintf("batch-val-%03d", i)}
+	}
+	// Duplicate key within the same batch: last write wins.
+	items = append(items, KVItem{Key: "batch-key-005", Value: "overwritten-val-005"})
+
+	if err := store.BatchSet(items); err != nil {
+		t.Fatalf("BatchSet failed: %v", err)
+	}
+
+	got, err := store.BatchGet(append(keys, "non-existent-key"))
+	if err != nil {
+		t.Fatalf("BatchGet failed: %v", err)
+	}
+	if len(got) != 100 {
+		t.Fatalf("expected 100 keys, got %d", len(got))
+	}
+	if got["batch-key-005"] != "overwritten-val-005" {
+		t.Fatalf("expected overwritten value, got %q", got["batch-key-005"])
+	}
+	if got["batch-key-099"] != "batch-val-099" {
+		t.Fatalf("expected batch-val-099, got %q", got["batch-key-099"])
+	}
+
+	// BatchDelete (including a missing key — must be idempotent).
+	if err := store.BatchDelete([]string{"batch-key-005", "batch-key-050", "missing-key"}); err != nil {
+		t.Fatalf("BatchDelete failed: %v", err)
+	}
+
+	gotAfterDel, err := store.BatchGet([]string{"batch-key-005", "batch-key-050", "batch-key-051"})
+	if err != nil {
+		t.Fatalf("BatchGet after delete failed: %v", err)
+	}
+	if len(gotAfterDel) != 1 || gotAfterDel["batch-key-051"] != "batch-val-051" {
+		t.Fatalf("unexpected BatchGet result after delete: %v", gotAfterDel)
+	}
+
+	// Concurrent BatchSet + BatchGet stress (verifies deadlock-free shard locking).
+	var g errgroup.Group
+	g.SetLimit(16)
+	for w := 0; w < 16; w++ {
+		w := w
+		g.Go(func() error {
+			batch := make([]KVItem, 20)
+			bKeys := make([]string, 20)
+			for j := 0; j < 20; j++ {
+				k := fmt.Sprintf("conc-%d-%d", w, j)
+				v := fmt.Sprintf("val-%d-%d", w, j)
+				batch[j] = KVItem{Key: k, Value: v}
+				bKeys[j] = k
+			}
+			if err := store.BatchSet(batch); err != nil {
+				return err
+			}
+			res, err := store.BatchGet(bKeys)
+			if err != nil {
+				return err
+			}
+			if len(res) != 20 {
+				return fmt.Errorf("worker %d: expected 20 keys, got %d", w, len(res))
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		t.Fatalf("concurrent batch ops failed: %v", err)
+	}
+}

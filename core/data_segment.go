@@ -255,6 +255,67 @@ func (ds *dataSegment) addKeyValue(key, value string, isDeleted bool, enableComp
 	return ds.id, startOffset, bytesLen, nil
 }
 
+// addKeyValueBatch encodes and appends multiple entries to the segment under
+// a single segment mutex acquisition and a single buffered write call.
+// Returns the segment ID and parallel slices of (offset, entrySize) per item.
+func (ds *dataSegment) addKeyValueBatch(items []KVItem, enableCompression bool) (string, []int64, []int64, error) {
+	if ds.state.Load() != segmentStateActive {
+		return "", nil, nil, ErrClosedDataSegment
+	}
+
+	n := len(items)
+	offsets := make([]int64, n)
+	sizes := make([]int64, n)
+
+	// Pre-estimate total encoded payload size and encode outside ds.mu.
+	totalEst := 0
+	for i := range items {
+		totalEst += 13 + len(items[i].Key) + len(items[i].Value)
+	}
+	batchBuf := make([]byte, 0, totalEst)
+
+	var scratch []byte
+	for i := range items {
+		checksum := computeCheckSum(items[i].Key, items[i].Value)
+		encoded := encodeLogEntryInto(scratch, items[i].Key, items[i].Value, false, checksum)
+		scratch = encoded[:cap(encoded)]
+
+		payload := encoded
+		if enableCompression {
+			var err error
+			payload, err = compressBytes(encoded)
+			if err != nil {
+				return "", nil, nil, err
+			}
+		}
+
+		offsets[i] = int64(len(batchBuf)) // relative offset within batch
+		sizes[i] = int64(len(payload))
+		batchBuf = append(batchBuf, payload...)
+	}
+
+	ds.mu.Lock()
+	if ds.state.Load() != segmentStateActive {
+		ds.mu.Unlock()
+		return "", nil, nil, ErrClosedDataSegment
+	}
+
+	baseOffset := ds.offset.Load()
+	if _, err := ds.writer.Write(batchBuf); err != nil {
+		ds.mu.Unlock()
+		return "", nil, nil, err
+	}
+	ds.dirty.Store(true)
+	ds.offset.Add(int64(len(batchBuf)))
+	ds.entriesCount.Add(int64(n))
+	ds.mu.Unlock()
+
+	for i := range offsets {
+		offsets[i] += baseOffset
+	}
+	return ds.id, offsets, sizes, nil
+}
+
 // addLogEntry adds a log entry to the data segment. The caller must hold a
 // reference (acquire) on the segment and the segment must be active.
 func (ds *dataSegment) addLogEntry(logEntry *protos.LogEntry, enableCompression bool) (string, *protos.LogEntryIndex, error) {

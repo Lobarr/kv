@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS builder
 
 WORKDIR /src
 
@@ -11,7 +11,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
     go build -trimpath -ldflags="-s -w" -o /out/kv ./main.go
 
-FROM arm64v8/alpine:3.21
+FROM arm64v8/alpine:3.24
 
 RUN apk --no-cache add ca-certificates \
     && addgroup -S kv && adduser -S -G kv kv \

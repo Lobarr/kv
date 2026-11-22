@@ -402,11 +402,20 @@ type Engine struct {
 	ctxCancelFunc              context.CancelFunc
 }
 
+// KVItem represents a single key-value pair for batch operations.
+type KVItem struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
 // Store instance of a storage engine
 type Store interface {
 	Get(string) (string, error)
 	Set(string, string) error
 	Delete(string) error
+	BatchGet([]string) (map[string]string, error)
+	BatchSet([]KVItem) error
+	BatchDelete([]string) error
 	Close() error
 }
 
@@ -737,6 +746,168 @@ func (engine *Engine) Set(key, value string) error {
 	})
 	shard.mu.Unlock()
 
+	return nil
+}
+
+// BatchSet stores multiple key-value pairs in a single batched write.
+// Unique state shards are locked in ascending shard order (deadlock-free)
+// and written to the active segment in a single buffered write call.
+func (engine *Engine) BatchSet(items []KVItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	if engine.closed.Load() {
+		return ErrEngineClosed
+	}
+
+	// Process in chunks bounded by segmentMaxSize so rollovers work cleanly.
+	maxChunk := engine.segmentMaxSize
+	if maxChunk <= 0 {
+		maxChunk = defaultSegmentMaxSize
+	}
+
+	for start := 0; start < len(items); start += maxChunk {
+		end := start + maxChunk
+		if end > len(items) {
+			end = len(items)
+		}
+		chunk := items[start:end]
+
+		if err := engine.checkDataSegment(); err != nil {
+			return err
+		}
+
+		// Collect unique shard indices and sort ascending for deadlock-free locking.
+		var shardMask [engineStateShardCount]bool
+		shardIDs := make([]uint32, 0, len(chunk))
+		for i := range chunk {
+			sid := stateShardForKey(chunk[i].Key)
+			if !shardMask[sid] {
+				shardMask[sid] = true
+				shardIDs = append(shardIDs, sid)
+			}
+		}
+		sort.Slice(shardIDs, func(i, j int) bool { return shardIDs[i] < shardIDs[j] })
+
+		for _, sid := range shardIDs {
+			engine.state.shards[sid].mu.Lock()
+		}
+
+		segment, err := engine.acquireSegmentForWrite()
+		if err != nil {
+			for i := len(shardIDs) - 1; i >= 0; i-- {
+				engine.state.shards[shardIDs[i]].mu.Unlock()
+			}
+			return err
+		}
+
+		segID, offsets, sizes, err := segment.addKeyValueBatch(chunk, engine.enableCompression)
+		segment.release()
+
+		if err != nil {
+			for i := len(shardIDs) - 1; i >= 0; i-- {
+				engine.state.shards[shardIDs[i]].mu.Unlock()
+			}
+			return err
+		}
+
+		for i := range chunk {
+			sid := stateShardForKey(chunk[i].Key)
+			engine.state.shards[sid].indexes[chunk[i].Key] = indexEntry{
+				segmentID: segID,
+				offset:    offsets[i],
+				entrySize: sizes[i],
+			}
+		}
+
+		for i := len(shardIDs) - 1; i >= 0; i-- {
+			engine.state.shards[shardIDs[i]].mu.Unlock()
+		}
+	}
+
+	return nil
+}
+
+// BatchGet retrieves values for multiple keys, grouping reads by segment so
+// each segment is pinned (and flushed if active) at most once per call.
+// Missing or deleted keys are omitted from the returned map.
+func (engine *Engine) BatchGet(keys []string) (map[string]string, error) {
+	if engine.closed.Load() {
+		return nil, ErrEngineClosed
+	}
+
+	results := make(map[string]string, len(keys))
+	if len(keys) == 0 {
+		return results, nil
+	}
+
+	type lookup struct {
+		key   string
+		entry indexEntry
+	}
+
+	// Group lookups by segment ID.
+	bySegment := make(map[string][]lookup)
+	for _, key := range keys {
+		entry, ok := engine.state.GetFast(key)
+		if !ok || entry.segmentID == "" {
+			continue
+		}
+		bySegment[entry.segmentID] = append(bySegment[entry.segmentID], lookup{key: key, entry: entry})
+	}
+
+	for segID, lookups := range bySegment {
+		segment, err := engine.acquireSegmentForRead(segID)
+		if err != nil {
+			// Fall back to per-key Get (handles concurrent compaction swaps).
+			for _, l := range lookups {
+				val, gErr := engine.Get(l.key)
+				if gErr == ErrKeyNotFound {
+					continue
+				}
+				if gErr != nil {
+					return nil, gErr
+				}
+				results[l.key] = val
+			}
+			continue
+		}
+
+		for _, l := range lookups {
+			val, isDeleted, rErr := segment.getLogEntryValueAt(l.entry.offset, l.entry.entrySize, engine.enableCompression)
+			if rErr != nil {
+				// Retry once via Get in case segment was compacted/swapped.
+				val, gErr := engine.Get(l.key)
+				if gErr == ErrKeyNotFound {
+					continue
+				}
+				if gErr != nil {
+					segment.release()
+					return nil, gErr
+				}
+				results[l.key] = val
+				continue
+			}
+			if !isDeleted {
+				results[l.key] = val
+			}
+		}
+		segment.release()
+	}
+
+	return results, nil
+}
+
+// BatchDelete deletes multiple keys. Missing keys are ignored (idempotent).
+func (engine *Engine) BatchDelete(keys []string) error {
+	if engine.closed.Load() {
+		return ErrEngineClosed
+	}
+	for _, key := range keys {
+		if err := engine.Delete(key); err != nil && err != ErrKeyNotFound {
+			return err
+		}
+	}
 	return nil
 }
 

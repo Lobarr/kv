@@ -41,33 +41,43 @@ func (s *GrpcServer) Delete(ctx context.Context, req *protos.DeleteRequest) (*pr
 }
 
 func (s *GrpcServer) BatchSet(ctx context.Context, req *protos.BatchSetRequest) (*protos.BatchSetResponse, error) {
-	for _, r := range req.Requests {
-		err := s.engine.Set(r.Key, r.Value)
-		if err != nil {
-			return nil, err
-		}
+	items := make([]KVItem, len(req.Requests))
+	for i, r := range req.Requests {
+		items[i] = KVItem{Key: r.Key, Value: r.Value}
+	}
+	if err := s.engine.BatchSet(items); err != nil {
+		return nil, err
 	}
 	return &protos.BatchSetResponse{}, nil
 }
 
 func (s *GrpcServer) BatchGet(ctx context.Context, req *protos.BatchGetRequest) (*protos.BatchGetResponse, error) {
-	responses := make([]*protos.GetResponse, len(req.Requests))
+	keys := make([]string, len(req.Requests))
 	for i, r := range req.Requests {
-		value, err := s.engine.Get(r.Key)
-		if err != nil {
-			return nil, err
+		keys[i] = r.Key
+	}
+	values, err := s.engine.BatchGet(keys)
+	if err != nil {
+		return nil, err
+	}
+	responses := make([]*protos.GetResponse, len(req.Requests))
+	for i, key := range keys {
+		val, ok := values[key]
+		if !ok {
+			return nil, ErrKeyNotFound
 		}
-		responses[i] = &protos.GetResponse{Value: value}
+		responses[i] = &protos.GetResponse{Value: val}
 	}
 	return &protos.BatchGetResponse{Responses: responses}, nil
 }
 
 func (s *GrpcServer) BatchDelete(ctx context.Context, req *protos.BatchDeleteRequest) (*protos.BatchDeleteResponse, error) {
-	for _, r := range req.Requests {
-		err := s.engine.Delete(r.Key)
-		if err != nil {
-			return nil, err
-		}
+	keys := make([]string, len(req.Requests))
+	for i, r := range req.Requests {
+		keys[i] = r.Key
+	}
+	if err := s.engine.BatchDelete(keys); err != nil {
+		return nil, err
 	}
 	return &protos.BatchDeleteResponse{}, nil
 }
