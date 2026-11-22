@@ -1,35 +1,55 @@
 package core
 
 import (
-	"path"
-	"sync"
+	"path/filepath"
+	"strings"
 )
 
-var (
-	mu       sync.RWMutex
-	dataPath string
-)
+// dataLayout defines the on-disk directory layout for a single engine
+// instance. Paths are per-Engine (not package globals) so multiple Engine
+// instances can coexist safely with independent data directories.
+type dataLayout struct {
+	dataPath string // root directory provided by the user
+}
 
-func getDataPath() string {
-	mu.RLock()
-	defer mu.RUnlock()
+func newDataLayout(dataPath string) *dataLayout {
+	return &dataLayout{dataPath: dataPath}
+}
 
-	if len(dataPath) == 0 {
-		panic("datapath has not been set")
+func (l *dataLayout) dataDir() string {
+	return filepath.Join(l.dataPath, "hashindex")
+}
+
+func (l *dataLayout) segmentsPath() string {
+	return filepath.Join(l.dataDir(), "segments")
+}
+
+func (l *dataLayout) snapshotsPath() string {
+	return filepath.Join(l.dataDir(), "snapshots")
+}
+
+// segmentFileName computes the full path of a segment file on disk.
+func (l *dataLayout) segmentFileName(id string) string {
+	return filepath.Join(l.segmentsPath(), segmentFileBaseName(id))
+}
+
+func segmentFileBaseName(id string) string {
+	return id + ".segment"
+}
+
+// segmentIDFromFileName extracts the segment ID from a segment file name
+// (or full path). Returns "" if the name does not look like a segment file.
+func segmentIDFromFileName(fileName string) string {
+	base := fileName
+	if idx := strings.LastIndexByte(base, '/'); idx >= 0 {
+		base = base[idx+1:]
 	}
-	return path.Join(dataPath, "hashindex")
-}
-
-func setDataPath(path string) {
-	mu.Lock()
-	dataPath = path
-	mu.Unlock()
-}
-
-func getSegmentsPath() string {
-	return path.Join(getDataPath(), "segments")
-}
-
-func getSnapshotsPath() string {
-	return path.Join(getDataPath(), "snapshots")
+	if idx := strings.LastIndexByte(base, '\\'); idx >= 0 {
+		base = base[idx+1:]
+	}
+	const suffix = ".segment"
+	if !strings.HasSuffix(base, suffix) {
+		return ""
+	}
+	return strings.TrimSuffix(base, suffix)
 }

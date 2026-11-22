@@ -11,6 +11,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+// Metrics are registered automatically by promauto; do not re-register them
+// in an init function (duplicate registration).
 var (
 	CompressBytesDurationNanoseconds = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name: "compress_bytes_duration_ns",
@@ -48,13 +50,6 @@ var (
 )
 
 func init() {
-	prometheus.Register(CompressBytesDurationNanoseconds)
-	prometheus.Register(CompressBytesDurationMilliseconds)
-	prometheus.Register(RawByteSizes)
-	prometheus.Register(UncompressBytesDurationNanoseconds)
-	prometheus.Register(UncompressBytesDurationMilliseconds)
-	prometheus.Register(CompressedByteSizes)
-
 	flateWriterPool = sync.Pool{
 		New: func() interface{} {
 			w, _ := flate.NewWriter(nil, flate.BestSpeed)
@@ -90,9 +85,7 @@ func compressBytes(rawBytes []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	// Make a copy regarding of buffer escape analysis, usually safer to return copy for byte slices
-	// OR usage might allow direct buffer bytes if lifecycle is managed.
-	// For safety, let's copy the result because the buffer is put back to pool.
+	// Copy the result because the buffer is put back into the pool.
 	result := make([]byte, compressedBytes.Len())
 	copy(result, compressedBytes.Bytes())
 
@@ -114,27 +107,24 @@ func uncompressBytes(compressedBytes []byte) ([]byte, error) {
 	defer bufferPool.Put(rawBuffer)
 
 	uncompressor := flate.NewReader(bytes.NewReader(compressedBytes))
-	// flate.NewReader documents it might return an interface that needs Close.
-	// But standard flate reader is just an io.ReadCloser implementation.
-	// Resetting a reader is tricky, usually we just create new one for reader as it is cheap compared to writer.
+	defer uncompressor.Close()
 
-	_, err := io.Copy(rawBuffer, uncompressor)
-	if err != nil {
+	if _, err := io.Copy(rawBuffer, uncompressor); err != nil {
 		return nil, err
 	}
 
-	if err = uncompressor.Close(); err != nil {
+	if err := uncompressor.Close(); err != nil {
 		return nil, err
 	}
 
-	// Copy result
+	// Copy result so the pooled buffer can be reused safely
 	result := make([]byte, rawBuffer.Len())
 	copy(result, rawBuffer.Bytes())
 
 	RawByteSizes.Observe(float64(len(result)))
 	CompressedByteSizes.Observe(float64(len(compressedBytes)))
-	CompressBytesDurationNanoseconds.Observe(float64(time.Since(start).Nanoseconds()))
-	CompressBytesDurationMilliseconds.Observe(float64(time.Since(start).Milliseconds()))
+	UncompressBytesDurationNanoseconds.Observe(float64(time.Since(start).Nanoseconds()))
+	UncompressBytesDurationMilliseconds.Observe(float64(time.Since(start).Milliseconds()))
 
 	return result, nil
 }
