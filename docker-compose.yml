@@ -1,18 +1,17 @@
-
-
 services:
   kv-server-fiber:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["./bin/kv", "--http-server-type=fiber"]
+    command: ["-http-server-type=fiber", "-data-path=/data"]
+    stop_grace_period: 15s
     ports:
       - "8888:8080"
       - "8081:8081"
     networks:
       - kv-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
       interval: 1s
       timeout: 1s
       retries: 10
@@ -21,14 +20,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["./bin/kv", "--http-server-type=std"]
+    command: ["-http-server-type=std", "-data-path=/data"]
+    stop_grace_period: 15s
     ports:
       - "8889:8080"
       - "8083:8081"
     networks:
       - kv-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
       interval: 1s
       timeout: 1s
       retries: 10
@@ -40,7 +40,7 @@ services:
     depends_on:
       kv-server-fiber:
         condition: service_healthy
-    command: ["--mode=http", "--base_url=http://kv-server-fiber:8080", "--num_requests=1000000", "--concurrency=500", "--batch_size=100"]
+    command: ["--mode=http", "--base-url=http://kv-server-fiber:8080", "--num-requests=1000000", "--concurrency=500", "--batch-size=100"]
     networks:
       - kv-network
 
@@ -51,7 +51,7 @@ services:
     depends_on:
       kv-server-std:
         condition: service_healthy
-    command: ["--mode=http", "--base_url=http://kv-server-std:8080", "--num_requests=1000000", "--concurrency=500", "--batch_size=100"]
+    command: ["--mode=http", "--base-url=http://kv-server-std:8080", "--num-requests=1000000", "--concurrency=500", "--batch-size=100"]
     networks:
       - kv-network
 
@@ -62,7 +62,7 @@ services:
     depends_on:
       kv-server-fiber:
         condition: service_healthy
-    command: ["--mode=grpc", "--grpc_addr=kv-server-fiber:8081", "--num_requests=1000000", "--concurrency=500", "--batch_size=100"]
+    command: ["--mode=grpc", "--grpc-addr=kv-server-fiber:8081", "--num-requests=1000000", "--concurrency=500", "--batch-size=100"]
     networks:
       - kv-network
 

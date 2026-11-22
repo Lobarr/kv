@@ -28,11 +28,14 @@ import (
 )
 
 var (
-	mode       = flag.String("mode", "direct", "Benchmark mode: direct, http, grpc, experiment")
-	grpcAddr   = flag.String("grpc-addr", ":50051", "gRPC server address")
-	baseURL    = flag.String("base-url", "http://localhost:8080", "HTTP server base URL")
-	dataPath   = flag.String("data-path", "./kv-data", "Path to store data")
-	cpuProfile = flag.String("cpu-profile", "", "Write cpu profile to file")
+	mode        = flag.String("mode", "direct", "Benchmark mode: direct, http, grpc, experiment")
+	grpcAddr    = flag.String("grpc-addr", ":50051", "gRPC server address")
+	baseURL     = flag.String("base-url", "http://localhost:8080", "HTTP server base URL")
+	dataPath    = flag.String("data-path", "./kv-data", "Path to store data")
+	cpuProfile  = flag.String("cpu-profile", "", "Write cpu profile to file")
+	numRequests = flag.Int("num-requests", 1000000, "Number of requests to run")
+	concurrency = flag.Int("concurrency", 1000, "Number of concurrent workers")
+	batchSize   = flag.Int("batch-size", 100, "Batch size for HTTP/gRPC/direct requests")
 )
 
 // ServerHandle holds references to the running server components for graceful shutdown
@@ -1278,10 +1281,9 @@ func main() {
 		return
 	}
 
-	// Default values for non-experiment modes
-	const defaultNumRequests = 1000000
-	const defaultConcurrency = 1000
-	const defaultBatchSize = 100
+	reqCount := *numRequests
+	conc := *concurrency
+	bSize := *batchSize
 
 	stats := &benchmarkStats{}
 	start := time.Now()
@@ -1289,7 +1291,7 @@ func main() {
 	var err error
 	switch *mode {
 	case "http":
-		err = runHTTPBatchBenchmark(stats, defaultNumRequests, defaultConcurrency, defaultBatchSize, *baseURL)
+		err = runHTTPBatchBenchmark(stats, reqCount, conc, bSize, *baseURL)
 	case "direct":
 		config := &core.EngineConfig{
 			SegmentMaxSize:             1000000,
@@ -1302,9 +1304,9 @@ func main() {
 			SnapshotTTLDuration:        1000 * time.Hour,
 			TolerableSnapshotFailCount: 5,
 		}
-		err = runDirectBenchmark(stats, config, defaultNumRequests, defaultConcurrency, defaultBatchSize)
+		err = runDirectBenchmark(stats, config, reqCount, conc, bSize)
 	case "grpc":
-		err = runGRPCBenchmark(stats, defaultNumRequests, defaultConcurrency, defaultBatchSize)
+		err = runGRPCBenchmark(stats, reqCount, conc, bSize)
 	}
 
 	if err != nil {
@@ -1312,5 +1314,5 @@ func main() {
 	}
 
 	elapsed := time.Since(start)
-	printResults(elapsed, stats, *mode, defaultConcurrency, defaultBatchSize)
+	printResults(elapsed, stats, *mode, conc, bSize)
 }

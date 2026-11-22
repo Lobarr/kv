@@ -1,18 +1,30 @@
-# Use the official Golang 1.24 image as the base image
-FROM golang:1.24
+# syntax=docker/dockerfile:1
 
-# Set the working directory inside the container
-WORKDIR /kv
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
 
-# Installing dependencies
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
+WORKDIR /src
+
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy the source code into the container
 COPY . .
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w" -o /out/kv ./main.go
 
-# Build the Go application
-RUN go build -o ./bin/kv main.go
+FROM alpine:3.21
 
-# Set the entry point to your Go application
-CMD ["./bin/kv"]
+RUN apk --no-cache add ca-certificates \
+    && addgroup -S kv && adduser -S -G kv kv \
+    && mkdir -p /data && chown kv:kv /data
+
+COPY --from=builder /out/kv /usr/local/bin/kv
+
+USER kv
+VOLUME ["/data"]
+EXPOSE 8080 8081
+
+ENTRYPOINT ["/usr/local/bin/kv"]
+CMD ["-data-path=/data"]

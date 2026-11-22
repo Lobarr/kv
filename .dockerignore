@@ -1,0 +1,10 @@
+.git
+.github
+.claude
+kv-data
+bin
+tmp
+*.md
+Dockerfile*
+docker-compose.yml
+Taskfile.yml
