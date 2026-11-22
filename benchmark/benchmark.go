@@ -1,16 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"math/rand"
 	"net"
-	"net/http"
-	"net/url"
 	"os"
 	"runtime/pprof"
 	"sort"
@@ -28,55 +24,25 @@ import (
 )
 
 var (
-	mode        = flag.String("mode", "direct", "Benchmark mode: direct, http, grpc, experiment")
+	mode        = flag.String("mode", "direct", "Benchmark mode: direct, grpc, experiment")
 	grpcAddr    = flag.String("grpc-addr", ":50051", "gRPC server address")
-	baseURL     = flag.String("base-url", "http://localhost:8080", "HTTP server base URL")
 	dataPath    = flag.String("data-path", "./kv-data", "Path to store data")
 	cpuProfile  = flag.String("cpu-profile", "", "Write cpu profile to file")
 	numRequests = flag.Int("num-requests", 1000000, "Number of requests to run")
 	concurrency = flag.Int("concurrency", 1000, "Number of concurrent workers")
-	batchSize   = flag.Int("batch-size", 100, "Batch size for HTTP/gRPC/direct requests")
+	batchSize   = flag.Int("batch-size", 100, "Batch size for gRPC/direct requests")
 )
 
 // ServerHandle holds references to the running server components for graceful shutdown
 type ServerHandle struct {
-	Engine        *core.Engine
-	GrpcServer    *grpc.Server
-	HttpStdServer *core.HttpStdServer // Wrapper for std net/http
-	HttpServer    *core.HttpServer    // Wrapper for gofiber
-	DataPath      string
+	Engine     *core.Engine
+	GrpcServer *grpc.Server
+	DataPath   string
 }
 
-// parseURL parses and validates the base URL.
-func parseURL(rawURL string) (*url.URL, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return nil, err
-	}
-	if u.Scheme == "" {
-		u.Scheme = "http"
-	}
-	return u, nil
-}
-
-// getFreePort asks the kernel for a free open port that is ready to use.
-func getFreePort() (int, error) {
-	addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
-	if err != nil {
-		return 0, err
-	}
-
-	l, err := net.ListenTCP("tcp", addr)
-	if err != nil {
-		return 0, err
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port, nil
-}
-
-// startKVServer starts the KV server (gRPC or HTTP) based on the mode and configuration.
+// startKVServer starts the gRPC KV server based on the mode and configuration.
 // It returns a ServerHandle for managing the server's lifecycle.
-func startKVServer(expConfig *ExperimentConfig, httpAddrOverride string) (*ServerHandle, error) {
+func startKVServer(expConfig *ExperimentConfig) (*ServerHandle, error) {
 	// Create a temporary data path for each server instance
 	tempDataPath, err := os.MkdirTemp("", "kv-benchmark-data-*")
 	if err != nil {
@@ -106,11 +72,9 @@ func startKVServer(expConfig *ExperimentConfig, httpAddrOverride string) (*Serve
 		DataPath: tempDataPath,
 	}
 
-	// Use errgroup to wait for server goroutines to start and report errors
 	g, _ := errgroup.WithContext(context.Background())
 
-	switch expConfig.Mode {
-	case "grpc":
+	if expConfig.Mode == "grpc" {
 		lis, err := net.Listen("tcp", *grpcAddr)
 		if err != nil {
 			engine.Close()
@@ -125,53 +89,6 @@ func startKVServer(expConfig *ExperimentConfig, httpAddrOverride string) (*Serve
 			return s.Serve(lis)
 		})
 		time.Sleep(500 * time.Millisecond)
-
-	case "http-std":
-		var httpAddr string
-		if httpAddrOverride != "" {
-			httpAddr = httpAddrOverride
-		} else {
-			parsedURL, err := parseURL(*baseURL)
-			if err != nil {
-				engine.Close()
-				os.RemoveAll(tempDataPath)
-				return nil, fmt.Errorf("failed to parse base URL: %w", err)
-			}
-			httpAddr = parsedURL.Host
-		}
-
-		httpServer := core.NewHttpStdServer(engine)
-		serverHandle.HttpStdServer = httpServer
-
-		g.Go(func() error {
-			return httpServer.Start(httpAddr)
-		})
-		time.Sleep(500 * time.Millisecond)
-
-	case "http", "http-fiber": // "http" defaults to fiber for backward compatibility if needed, or we explicitly perform "http-fiber"
-		var httpAddr string
-		if httpAddrOverride != "" {
-			httpAddr = httpAddrOverride
-		} else {
-			parsedURL, err := parseURL(*baseURL)
-			if err != nil {
-				engine.Close()
-				os.RemoveAll(tempDataPath)
-				return nil, fmt.Errorf("failed to parse base URL: %w", err)
-			}
-			httpAddr = parsedURL.Host
-		}
-
-		httpServer := core.NewHttpServer(engine)
-		serverHandle.HttpServer = httpServer
-
-		g.Go(func() error {
-			return httpServer.Start(httpAddr)
-		})
-		time.Sleep(500 * time.Millisecond)
-
-	default:
-		// Direct mode does not start an external server.
 	}
 
 	return serverHandle, nil
@@ -185,22 +102,7 @@ func (sh *ServerHandle) stopKVServer() error {
 		sh.GrpcServer.GracefulStop()
 	}
 
-	if sh.HttpStdServer != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := sh.HttpStdServer.Shutdown(ctx); err != nil {
-			errs = append(errs, fmt.Errorf("failed to shutdown HTTP (std) server: %w", err))
-		}
-	}
-
-	if sh.HttpServer != nil {
-		if err := sh.HttpServer.Shutdown(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to shutdown HTTP (Fiber) server: %w", err))
-		}
-	}
-
 	if sh.Engine != nil {
-		// Use a short delay/retry for closing engine if needed, but usually Close is enough.
 		if err := sh.Engine.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("failed to close engine: %w", err))
 		}
@@ -353,21 +255,6 @@ var baseExperiments = []ExperimentConfig{
 	{Name: "gRPC Conc 100", Mode: "grpc", SegmentMaxSize: 1000000, CacheSize: 10000, ShouldCompact: false, CompactorWorkerCount: 0, NumRequests: 500000, Concurrency: 100, BatchSize: 100},
 	{Name: "gRPC Conc 1000", Mode: "grpc", SegmentMaxSize: 1000000, CacheSize: 10000, ShouldCompact: false, CompactorWorkerCount: 0, NumRequests: 1000000, Concurrency: 1000, BatchSize: 100},
 	{Name: "gRPC Conc 2000", Mode: "grpc", SegmentMaxSize: 1000000, CacheSize: 10000, ShouldCompact: false, CompactorWorkerCount: 0, NumRequests: 1000000, Concurrency: 2000, BatchSize: 100},
-
-	// --- HTTP MODE ---
-	// 1. Fiber Batching
-	{Name: "Fiber Batch 1", Mode: "http-fiber", SegmentMaxSize: 1000000, CacheSize: 10000, ShouldCompact: false, CompactorWorkerCount: 0, NumRequests: 100000, Concurrency: 500, BatchSize: 1},
-	{Name: "Fiber Batch 50", Mode: "http-fiber", SegmentMaxSize: 1000000, CacheSize: 10000, ShouldCompact: false, CompactorWorkerCount: 0, NumRequests: 1000000, Concurrency: 500, BatchSize: 50},
-	{Name: "Fiber Batch 100", Mode: "http-fiber", SegmentMaxSize: 1000000, CacheSize: 10000, ShouldCompact: false, CompactorWorkerCount: 0, NumRequests: 1000000, Concurrency: 500, BatchSize: 100},
-	{Name: "Fiber Batch 500", Mode: "http-fiber", SegmentMaxSize: 1000000, CacheSize: 10000, ShouldCompact: false, CompactorWorkerCount: 0, NumRequests: 1000000, Concurrency: 500, BatchSize: 500},
-	{Name: "Fiber Batch 1000", Mode: "http-fiber", SegmentMaxSize: 1000000, CacheSize: 10000, ShouldCompact: false, CompactorWorkerCount: 0, NumRequests: 1000000, Concurrency: 500, BatchSize: 1000},
-
-	// 2. Fiber Concurrency
-	{Name: "Fiber Conc 1000", Mode: "http-fiber", SegmentMaxSize: 1000000, CacheSize: 10000, ShouldCompact: false, CompactorWorkerCount: 0, NumRequests: 1000000, Concurrency: 1000, BatchSize: 100},
-	{Name: "Fiber Conc 2000", Mode: "http-fiber", SegmentMaxSize: 1000000, CacheSize: 10000, ShouldCompact: false, CompactorWorkerCount: 0, NumRequests: 1000000, Concurrency: 2000, BatchSize: 100},
-
-	// 3. Std Comparison
-	{Name: "Std Batch 100", Mode: "http-std", SegmentMaxSize: 1000000, CacheSize: 10000, ShouldCompact: false, CompactorWorkerCount: 0, NumRequests: 1000000, Concurrency: 500, BatchSize: 100},
 }
 
 func randomString(n int) string {
@@ -430,139 +317,6 @@ func formatNumber(n float64) string {
 	default:
 		return fmt.Sprintf("%.0f", n)
 	}
-}
-
-func runHTTPBatchBenchmark(stats *benchmarkStats, numRequests int, concurrency int, batchSizeParam int, targetBaseURL string) error {
-	// Create a custom client to avoid connection reuse issues between server restarts
-	// IMPORTANT: Enable KeepAlives but set generous pool limits to match concurrency.
-	client := &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives:   false,
-			MaxIdleConns:        concurrency + 10,
-			MaxIdleConnsPerHost: concurrency + 10,
-		},
-		Timeout: 30 * time.Second,
-	}
-	defer client.CloseIdleConnections()
-
-	// Phase 1: Write all keys
-	writeStart := time.Now()
-	var wgWrite errgroup.Group
-	wgWrite.SetLimit(concurrency)
-
-	for i := 0; i < numRequests; i += batchSizeParam {
-		i := i
-		wgWrite.Go(func() error {
-			currentBatchSize := batchSizeParam
-			if i+currentBatchSize > numRequests {
-				currentBatchSize = numRequests - i
-			}
-
-			// Batch SET
-			setItems := make([]map[string]string, currentBatchSize)
-			for j := 0; j < currentBatchSize; j++ {
-				idx := i + j
-				key := fmt.Sprintf("key-%09d", idx)
-				value := fmt.Sprintf("val-%09d", idx)
-				setItems[j] = map[string]string{"key": key, "value": value}
-			}
-
-			startSet := time.Now()
-			setBody, _ := json.Marshal(map[string]interface{}{"items": setItems})
-			resp, err := client.Post(fmt.Sprintf("%s/batch/set", targetBaseURL), "application/json", bytes.NewReader(setBody))
-			if err != nil {
-				stats.setErrors.Add(int64(currentBatchSize))
-				return fmt.Errorf("failed to batch set: %v", err)
-			}
-			resp.Body.Close()
-			setElapsed := time.Since(startSet)
-			stats.totalWriteTime.Add(setElapsed.Nanoseconds())
-			stats.RecordWriteLatency(setElapsed)
-			if resp.StatusCode != http.StatusOK {
-				stats.setErrors.Add(int64(currentBatchSize))
-				return fmt.Errorf("failed to batch set: status code %d", resp.StatusCode)
-			}
-			stats.setCount.Add(int64(currentBatchSize))
-			for _, item := range setItems {
-				stats.totalSetBytes.Add(int64(len(item["key"]) + len(item["value"])))
-			}
-
-			return nil
-		})
-	}
-	if err := wgWrite.Wait(); err != nil {
-		return err
-	}
-	stats.writePhaseElapsed.Store(time.Since(writeStart).Nanoseconds())
-
-	// Phase 2: Read all keys
-	readStart := time.Now()
-	var wgRead errgroup.Group
-	wgRead.SetLimit(concurrency)
-
-	for i := 0; i < numRequests; i += batchSizeParam {
-		i := i
-		wgRead.Go(func() error {
-			currentBatchSize := batchSizeParam
-			if i+currentBatchSize > numRequests {
-				currentBatchSize = numRequests - i
-			}
-
-			// Batch GET
-			getKeys := make([]string, currentBatchSize)
-			expectedValues := make(map[string]string, currentBatchSize)
-			for j := 0; j < currentBatchSize; j++ {
-				idx := i + j
-				key := fmt.Sprintf("key-%09d", idx)
-				value := fmt.Sprintf("val-%09d", idx)
-				getKeys[j] = key
-				expectedValues[key] = value
-			}
-
-			startGet := time.Now()
-			getBody, _ := json.Marshal(map[string]interface{}{"keys": getKeys})
-			resp, err := client.Post(fmt.Sprintf("%s/batch/get", targetBaseURL), "application/json", bytes.NewReader(getBody))
-			if err != nil {
-				stats.getErrors.Add(int64(currentBatchSize))
-				return fmt.Errorf("failed to batch get: %v", err)
-			}
-			defer resp.Body.Close()
-			getElapsed := time.Since(startGet)
-			stats.totalReadTime.Add(getElapsed.Nanoseconds())
-			stats.RecordReadLatency(getElapsed)
-
-			if resp.StatusCode != http.StatusOK {
-				stats.getErrors.Add(int64(currentBatchSize))
-				return fmt.Errorf("failed to batch get: status code %d", resp.StatusCode)
-			}
-
-			var getResp struct {
-				Items []struct {
-					Key   string `json:"key"`
-					Value string `json:"value"`
-				} `json:"items"`
-			}
-			if err := json.NewDecoder(resp.Body).Decode(&getResp); err != nil {
-				stats.getErrors.Add(int64(currentBatchSize))
-				return fmt.Errorf("failed to decode get response: %v", err)
-			}
-
-			stats.getCount.Add(int64(len(getResp.Items)))
-			for _, item := range getResp.Items {
-				if expectedValues[item.Key] != item.Value {
-					stats.getErrors.Add(1)
-				}
-				stats.totalGetBytes.Add(int64(len(item.Value)))
-			}
-
-			return nil
-		})
-	}
-	if err := wgRead.Wait(); err != nil {
-		return err
-	}
-	stats.readPhaseElapsed.Store(time.Since(readStart).Nanoseconds())
-	return nil
 }
 
 func runDirectBenchmark(stats *benchmarkStats, config *core.EngineConfig, numRequests int, concurrency int, batchSizeParam int) error {
@@ -844,44 +598,22 @@ func runExperiments() {
 		start := time.Now()
 
 		switch expMode {
-		case "http", "http-fiber", "http-std", "grpc":
-			var httpAddrOverride string
-			var targetBaseURL string = *baseURL
-
-			if expMode == "http" || expMode == "http-fiber" || expMode == "http-std" {
-				// Allocate a dynamic port for HTTP experiments to avoid conflicts
-				port, err := getFreePort()
-				if err != nil {
-					fmt.Printf("Experiment %s failed: failed to get free port: %v\n", expConfig.Name, err)
-					continue
-				}
-				httpAddrOverride = fmt.Sprintf("localhost:%d", port)
-				targetBaseURL = fmt.Sprintf("http://%s", httpAddrOverride)
-			}
-
+		case "grpc":
 			// Start server for this experiment
-			serverHandle, err = startKVServer(&expConfig, httpAddrOverride)
+			serverHandle, err = startKVServer(&expConfig)
 			if err != nil {
 				err = fmt.Errorf("server start failed: %w", err)
 				fmt.Printf("Error starting server for %s: %v\n", expConfig.Name, err)
 			} else {
-				// Run benchmark against the started server
-				if expMode == "http" || expMode == "http-fiber" || expMode == "http-std" {
-					err = runHTTPBatchBenchmark(stats, reqs, conc, expConfig.BatchSize, targetBaseURL)
-				} else {
-					err = runGRPCBenchmark(stats, reqs, conc, expConfig.BatchSize)
-				}
-
+				err = runGRPCBenchmark(stats, reqs, conc, expConfig.BatchSize)
 				if err != nil {
 					fmt.Printf("Benchmark %s failed: %v\n", expConfig.Name, err)
 				}
 
-				// Stop server after benchmark
 				if stopErr := serverHandle.stopKVServer(); stopErr != nil {
 					// Ignore errors during cleanup
 				}
 			}
-			// Sleep to ensure ports are released
 			time.Sleep(2 * time.Second)
 
 		default: // direct
@@ -1272,8 +1004,8 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-	if *mode != "http" && *mode != "direct" && *mode != "grpc" && *mode != "experiment" {
-		log.Fatalf("Invalid mode: %s. Must be 'http', 'direct', 'grpc' or 'experiment'", *mode)
+	if *mode != "direct" && *mode != "grpc" && *mode != "experiment" {
+		log.Fatalf("Invalid mode: %s. Must be 'direct', 'grpc' or 'experiment'", *mode)
 	}
 
 	if *mode == "experiment" {
@@ -1290,8 +1022,6 @@ func main() {
 
 	var err error
 	switch *mode {
-	case "http":
-		err = runHTTPBatchBenchmark(stats, reqCount, conc, bSize, *baseURL)
 	case "direct":
 		config := &core.EngineConfig{
 			SegmentMaxSize:             1000000,

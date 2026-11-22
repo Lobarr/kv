@@ -24,7 +24,7 @@ COPY --from=builder /out/kv /usr/local/bin/kv
 
 USER kv
 VOLUME ["/data"]
-EXPOSE 8080 8081 9999
+EXPOSE 8081 9999
 
 ENTRYPOINT ["/usr/local/bin/kv"]
 CMD ["-data-path=/data"]

@@ -23,14 +23,14 @@ import (
 )
 
 var (
-	httpServerType       = flag.String("http-server-type", "fiber", "HTTP server implementation to use (fiber or std)")
+	grpcAddr             = flag.String("grpc-addr", ":8081", "address for gRPC server")
+	metricsAddr          = flag.String("metrics-addr", ":9999", "address for /health and Prometheus /metrics")
 	segmentMaxSize       = flag.Int("segment_max_size", 1000000, "max size of entries stored in a data segment")
 	cacheSize            = flag.Int("cache_size", 10000, "max number of data segments to hold in memory")
 	shouldCompact        = flag.Bool("should_compact", false, "should the data be compacted")
 	compactorWorkerCount = flag.Int("compactor_worker_count", 1, "number of workers compaction process uses")
 	dataPath             = flag.String("data-path", "/tmp/kv-data", "path where store data is persisted on disk")
 	enableCompression    = flag.Bool("enable_compression", false, "whether to enable compression or not")
-	metricsAddr          = flag.String("metrics-addr", ":9999", "address to expose Prometheus /metrics endpoint")
 )
 
 func init() {
@@ -60,49 +60,40 @@ func main() {
 	}
 
 	g := new(errgroup.Group)
+
 	grpcServer := grpc.NewServer()
 
 	// Start gRPC server
 	g.Go(func() error {
-		lis, err := net.Listen("tcp", ":8081")
+		lis, err := net.Listen("tcp", *grpcAddr)
 		if err != nil {
-			log.Fatalf("failed to listen: %v", err)
+			return err
 		}
 		protos.RegisterKVServer(grpcServer, core.NewGrpcServer(engine))
 		log.Printf("grpc server listening at %v", lis.Addr())
 		return grpcServer.Serve(lis)
 	})
 
-	httpServer := core.NewHttpServer(engine)
-	httpStdServer := core.NewHttpStdServer(engine)
-
-	metricsMux := http.NewServeMux()
-	metricsMux.Handle("/metrics", promhttp.Handler())
-	metricsServer := &http.Server{
+	// Start admin server (/health + Prometheus /metrics)
+	adminMux := http.NewServeMux()
+	adminMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
+	})
+	adminMux.Handle("/metrics", promhttp.Handler())
+	adminServer := &http.Server{
 		Addr:    *metricsAddr,
-		Handler: metricsMux,
+		Handler: adminMux,
 	}
 
-	// Start Prometheus metrics server
 	g.Go(func() error {
-		log.Printf("metrics server listening at %s/metrics", *metricsAddr)
-		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("admin server listening at %s (/health, /metrics)", *metricsAddr)
+		if err := adminServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			return err
 		}
 		return nil
 	})
 
-	// Start HTTP server
-	g.Go(func() error {
-		log.Printf("http server listening at :8080")
-		if *httpServerType == "std" {
-			return httpStdServer.Start(":8080")
-		}
-		return httpServer.Start(":8080")
-	})
-
-	// Wait for the servers in the background; we coordinate shutdown below so
-	// the engine is always closed before the process exits.
 	serverErr := make(chan error, 1)
 	go func() { serverErr <- g.Wait() }()
 
@@ -111,7 +102,6 @@ func main() {
 
 	select {
 	case err := <-serverErr:
-		// Servers stopped on their own (or failed): still flush the engine.
 		if closeErr := engine.Close(); closeErr != nil {
 			logrus.Errorf("engine close error: %v", closeErr)
 		}
@@ -122,41 +112,24 @@ func main() {
 	case received := <-sig:
 		logrus.Infof("received signal %v, shutting down", received)
 
-		// Stop accepting new connections (bounded), then flush and close the
-		// engine so a final snapshot is always persisted before exit.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		if *httpServerType == "std" {
-			if err := httpStdServer.Shutdown(shutdownCtx); err != nil {
-				logrus.Errorf("http server shutdown error: %v", err)
-			}
-		} else {
-			if err := httpServer.Shutdown(); err != nil {
-				logrus.Errorf("http server shutdown error: %v", err)
-			}
-		}
-		_ = metricsServer.Shutdown(shutdownCtx)
+		_ = adminServer.Shutdown(shutdownCtx)
 
-		// GracefulStop waits for in-flight RPCs; fall back to a hard stop.
-		stopped := make(chan struct{})
+		grpcDone := make(chan struct{})
 		go func() {
 			grpcServer.GracefulStop()
-			close(stopped)
+			close(grpcDone)
 		}()
 		select {
-		case <-stopped:
+		case <-grpcDone:
 		case <-shutdownCtx.Done():
 			grpcServer.Stop()
-			<-stopped
 		}
 
-		if closeErr := engine.Close(); closeErr != nil {
-			logrus.Errorf("engine close error: %v", closeErr)
+		if err := engine.Close(); err != nil {
+			logrus.Errorf("engine close error: %v", err)
 		}
-
-		// Engine state is flushed; the servers are already stopped so the
-		// errgroup returns promptly. Exit without waiting on it.
-		os.Exit(0)
 	}
 }
