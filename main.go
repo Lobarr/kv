@@ -5,6 +5,7 @@ import (
 	"flag"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -28,6 +30,7 @@ var (
 	compactorWorkerCount = flag.Int("compactor_worker_count", 1, "number of workers compaction process uses")
 	dataPath             = flag.String("data-path", "/tmp/kv-data", "path where store data is persisted on disk")
 	enableCompression    = flag.Bool("enable_compression", false, "whether to enable compression or not")
+	metricsAddr          = flag.String("metrics-addr", ":9999", "address to expose Prometheus /metrics endpoint")
 )
 
 func init() {
@@ -73,6 +76,22 @@ func main() {
 	httpServer := core.NewHttpServer(engine)
 	httpStdServer := core.NewHttpStdServer(engine)
 
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", promhttp.Handler())
+	metricsServer := &http.Server{
+		Addr:    *metricsAddr,
+		Handler: metricsMux,
+	}
+
+	// Start Prometheus metrics server
+	g.Go(func() error {
+		log.Printf("metrics server listening at %s/metrics", *metricsAddr)
+		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			return err
+		}
+		return nil
+	})
+
 	// Start HTTP server
 	g.Go(func() error {
 		log.Printf("http server listening at :8080")
@@ -117,6 +136,7 @@ func main() {
 				logrus.Errorf("http server shutdown error: %v", err)
 			}
 		}
+		_ = metricsServer.Shutdown(shutdownCtx)
 
 		// GracefulStop waits for in-flight RPCs; fall back to a hard stop.
 		stopped := make(chan struct{})

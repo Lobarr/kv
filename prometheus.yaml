@@ -5,4 +5,4 @@ scrape_configs:
   - job_name: kv
     honor_labels: true
     static_configs:
-      - targets: [ "localhost:9999" ]
+      - targets: ["kv-server-fiber:9999", "kv-server-std:9999"]

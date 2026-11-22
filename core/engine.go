@@ -823,6 +823,7 @@ func (engine *Engine) BatchSet(items []KVItem) error {
 		for i := len(shardIDs) - 1; i >= 0; i-- {
 			engine.state.shards[shardIDs[i]].mu.Unlock()
 		}
+		EngineKeysCount.Add(float64(len(chunk)))
 	}
 
 	return nil
@@ -1830,6 +1831,29 @@ func NewEngine(config *EngineConfig) (*Engine, error) {
 	if config.ShouldCompact {
 		go engine.startCompactors(engine.ctx)
 	}
+
+	// Register zero-hot-path-cost scrape-time gauges for live engine introspection.
+	_ = prometheus.Register(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "engine_keys_in_index",
+		Help: "current number of keys stored in the in-memory index",
+	}, func() float64 {
+		return float64(engine.state.Len())
+	}))
+	_ = prometheus.Register(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "engine_lru_segments_cached",
+		Help: "current number of sealed data segments cached in the LRU",
+	}, func() float64 {
+		return float64(engine.lruSegments.Len())
+	}))
+	_ = prometheus.Register(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "engine_active_segment_entries",
+		Help: "current number of entries in the active write segment",
+	}, func() float64 {
+		if seg := engine.activeSegment.Load(); seg != nil {
+			return float64(seg.getEntriesCount())
+		}
+		return 0
+	}))
 
 	return engine, nil
 }

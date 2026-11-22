@@ -8,6 +8,7 @@ services:
     ports:
       - "8888:8080"
       - "8081:8081"
+      - "9999:9999"
     networks:
       - kv-network
     healthcheck:
@@ -63,6 +64,15 @@ services:
       kv-server-fiber:
         condition: service_healthy
     command: ["--mode=grpc", "--grpc-addr=kv-server-fiber:8081", "--num-requests=1000000", "--concurrency=500", "--batch-size=100"]
+    networks:
+      - kv-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yml:ro
     networks:
       - kv-network
 
